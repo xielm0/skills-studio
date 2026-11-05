@@ -1,0 +1,140 @@
+/* 备份 Skills（两卡片极简版）：本地备份 / 远程备份或恢复；反馈就地显示。 */
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+/* 本地备份状态行：最近备份时间 + 短版本号 */
+.localMeta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  font-size: 13px;
+  color: var(--c-text-secondary);
+}
+
+.localSha {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.repoRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+}
+
+.label {
+  flex: none;
+  width: 64px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--c-border);
+}
+
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+}
+
+.progress {
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+/* ---------- 结果反馈（就地显示在所属卡片下方） ---------- */
+
+.feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s-3);
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+}
+
+.feedbackOk {
+  border-left-color: var(--c-status-ok);
+}
+
+.feedbackError {
+  border-left-color: var(--c-status-error);
+  background: #fdf3f3;
+}
+
+.feedbackText {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-text);
+  word-break: break-word;
+}
+
+.notice {
+  margin-top: var(--s-3);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-muted);
+}
+
+/* ---------- 加载 / 错误 ---------- */
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 20px 24px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.errorTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-status-error);
+}
+
+.errorText {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+  word-break: break-word;
+}

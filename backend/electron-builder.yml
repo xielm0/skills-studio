@@ -1,0 +1,72 @@
+# Windows x64 NSIS 安装包配置（由 scripts/package.mjs 驱动）。
+# 安装形态约定见 specs/guide.md「部署和上线」：用户级、免管理员、向导式、卸载不删用户数据。
+
+appId: com.skills-studio.app
+productName: skills-studio
+# 默认安装目录 = %LOCALAPPDATA%\Programs\skills-studio（英文，避开中文路径坑），
+# 向导中允许用户改目录；开始菜单快捷方式单独用中文名（nsis.shortcutName）。
+
+directories:
+  # 打包暂存（asar 组装等中间产物）放仓库 .cache/：杀软实时扫描对项目目录的
+  # 干扰只发生在暂存阶段；最终 exe 由 package.mjs 拷贝到 backend/release/（约定产物位置）。
+  output: ../.cache/pkg
+
+# asar 混合（快装 + 可投放）：
+#  - node_modules/dist 等主体进单个 app.asar（安装从「写 1.1 万个小文件」变成写 1 个大文件）；
+#  - agents/skills 用 extraResources 落在 resources/agents/skills（asar 外、可写），
+#    生产 SOFT_DIR = resources（main.ts resolveProductionPaths 按 .asar 判定取 dirname），
+#    与 CLI 上报的投放目录 <SOFT_DIR>/agents/skills 同一根；
+#  - wasm / 原生模块解包落地（Electron 对 unpacked 文件按 asar 内路径自动重定向，代码零改动）。
+asar: true
+asarUnpack:
+  - '**/*.wasm'
+  - '**/*.node'
+
+files:
+  - dist/**/*
+  - package.json
+  - .env.selected
+  # file:../agents 依赖以 junction 形态指向 agents 源目录，运行时只需构建产物：
+  - '!node_modules/@skills-studio/agent/src/**'
+  - '!node_modules/@skills-studio/agent/scripts/**'
+  - '!node_modules/@skills-studio/agent/tsconfig.json'
+  - '!node_modules/@skills-studio/agent/package-lock.json'
+  - '!node_modules/@skills-studio/agent/.workbuddy/**'
+
+extraResources:
+  # main.ts 加载 PROJECT_ROOT/frontend/dist/index.html；PROJECT_ROOT = resources（app.asar 上两级）
+  - from: ../frontend/dist
+    to: frontend/dist
+  # 内部技能源目录（用户可随时投放新 Skill；cli.ts 按 <SOFT_DIR>/agents/skills 寻址）
+  - from: ../agents/skills
+    to: agents/skills
+
+# Electron 自带约 50 种语言包（45MB），产品只用中文与英文
+electronLanguages:
+  - zh-CN
+  - en-US
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+# 发布源：GitHub Releases（xielm0/skills-studio）。打包生成 resources/app-update.yml
+# （客户端检查入口）与 latest.yml（更新清单，随 Release 上传，见 specs/guide.md「发布新版本」）。
+# *.blockmap 由 electron-builder 一并生成但**不发版**：NSIS+LZMA 压缩下差量下载基本失效，
+# 缺 blockmap 时 electron-updater 自动退回全量下载 + latest.yml 整体 sha512 校验。
+# 本地 npm run package 不带 --publish，只生成不上传。
+publish:
+  provider: github
+  owner: xielm0
+  repo: skills-studio
+
+nsis:
+  oneClick: false                           # 向导式安装
+  perMachine: false                         # 用户级：默认装到 %LOCALAPPDATA%\Programs，免管理员
+  allowElevation: false                     # 不请求 UAC 提权
+  allowToChangeInstallationDirectory: true  # 允许选安装目录（TEMP_DIR 留空=跟随实际目录，随装随对）
+  shortcutName: Skills 工作台
+  deleteAppDataOnUninstall: false           # 卸载不删 %APPDATA%\skills-studio 与用户技能库
+  artifactName: ${productName}-Setup-${version}-x64.exe

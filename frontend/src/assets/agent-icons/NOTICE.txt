@@ -1,0 +1,3 @@
+All agent icons in this directory are copied from E:\Github\skills-manager\public\agent-icons.
+Source project: Skills Manager, Copyright (c) 2026 Tianliang Zhang.
+The source project's MIT license is included as LICENSE.skills-manager.txt.

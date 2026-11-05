@@ -1,0 +1,164 @@
+/* 表格首列与页头标题同一起点：内容区已有 24px 内边距，这里清零。
+   !important 用于盖过 common.module.css 的 `.table th/td` 默认内边距。 */
+.firstCol {
+  padding-left: 0 !important;
+}
+
+/* 状态与操作列居中；同样需要 !important 才能盖过 `.table th { text-align: left }` */
+.centerCol {
+  text-align: center !important;
+}
+
+/* Tab 下方的工具行：左为该 Agent 的 Skills 目录，右为本目录内已同步数量 */
+.path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+.sep {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-border);
+}
+
+/* 打开文件夹失败提示：单行省略，完整原因放在 title 里，不撑高工具行 */
+.toolbarError {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+/* 名称搜索框：与中心库页同宽，固定宽度不随窗口拉伸 */
+.search {
+  width: 220px;
+  flex: none;
+}
+
+.descCol {
+  overflow: hidden;
+}
+
+/* 描述与中心库页一致：自动换行、不限行数（不设 nowrap，避免单行截断） */
+.desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+  word-break: break-word;
+}
+
+.tableEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 380px;
+}
+
+.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--c-text);
+  outline-offset: -2px;
+}
+
+/* 空态行不参与整行悬停高亮（避免大面积灰底） */
+.emptyRow:hover {
+  background: transparent !important;
+}
+
+.emptyRow td {
+  border-bottom: 0;
+}
+
+/* 行尾 ⋯ 与菜单：与中心库页同一形态（28×24 触发、浮层右对齐、危险项红字） */
+.actionsCol {
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+}
+
+.menuAnchor {
+  position: relative;
+  display: inline-block;
+}
+
+.moreButton {
+  width: 28px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--c-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.moreButton:hover {
+  border-color: var(--c-border);
+  background: var(--c-bg);
+  color: var(--c-text);
+}
+
+.moreButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 108px;
+  padding: 4px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu button {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover {
+  background: var(--c-bg-hover);
+}
+
+.menuDanger {
+  color: var(--c-status-error) !important;
+}
+
+/* 状态灯：小面积圆点；含义只在悬停/聚焦提示中出现，不在行内重复文字 */
+.rowError {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-status-error);
+}

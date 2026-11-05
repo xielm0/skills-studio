@@ -1,0 +1,47 @@
+{
+  "name": "skills-studio",
+  "private": true,
+  "version": "0.1.0",
+  "productName": "skills-studio",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "cli": "node dist/cli.js",
+    "test": "node --test tests/t01.test.mjs",
+    "start": "node ../scripts/dev-start.mjs",
+    "smoke": "node scripts/start.mjs --env=development --smoke-test",
+    "screenshot": "node scripts/screenshot.mjs",
+    "screenshot:t10": "node scripts/screenshot.mjs --scenario=t10",
+    "screenshot:t11": "node scripts/screenshot.mjs --scenario=t11",
+    "screenshot:t12": "node scripts/screenshot.mjs --scenario=t12",
+    "screenshot:t13": "node scripts/screenshot.mjs --scenario=t13",
+    "screenshot:t14": "node scripts/screenshot.mjs --scenario=t14",
+    "screenshot:t15": "node scripts/screenshot.mjs --scenario=t15",
+    "test:t10": "node --no-warnings --test tests/t10.test.mjs",
+    "test:t11": "node --no-warnings --test tests/t11.test.mjs",
+    "test:t12": "node --no-warnings --test tests/t12.test.mjs",
+    "test:t13": "node --no-warnings --test tests/t13.test.mjs",
+    "test:t14": "node --no-warnings --test tests/t14.test.mjs",
+    "test:t15": "node --no-warnings --test tests/t15.test.mjs",
+    "package": "node scripts/package.mjs",
+    "package:release": "node scripts/package.mjs --release"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.6.5",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.0.12",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@skills-studio/agent": "file:../agents",
+    "adm-zip": "^0.6.1",
+    "electron-updater": "^6.8.11",
+    "js-yaml": "^5.5.0"
+  }
+}

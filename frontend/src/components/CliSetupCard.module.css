@@ -1,0 +1,104 @@
+/* 主页 CLI 接入卡片（一次性指引）：面板 + 勾选 Agent 胶囊 + 主操作。 */
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: 14px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.description {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-text-secondary);
+}
+
+.picker {
+  margin-top: 12px;
+}
+
+.pickerLabel {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.chipOn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  cursor: pointer;
+}
+
+.chipOn {
+  border-color: var(--c-accent, var(--c-text));
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.empty {
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.confirmLabel {
+  /* Segoe UI/雅黑混排的字形留白与基线，使可见文字偏左下；仅校正标签，不移动按钮。 */
+  transform: translate(4px, -2px);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-sm, 6px);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--c-bg-hover);
+  color: var(--c-text-secondary);
+}

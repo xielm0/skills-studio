@@ -1,0 +1,49 @@
+# 依赖
+node_modules/
+
+# 构建产物
+frontend/dist/
+backend/dist/
+agents/dist/
+
+# 打包产物与 electron-builder 资源副本（图标源在 assets/branding/）
+backend/release/
+backend/release-fresh/
+backend/build/
+
+# 环境文件（tec.md §4：本地持有，不入库，不含密钥）
+.env.development
+.env.production
+.env.uat
+.env.selected
+
+# 开发期本地数据（tec.md §4）
+db/
+storage/
+backend/logs/
+
+# 测试与开发夹具（整体不上传）
+tests/
+
+# 内部设计文档（不上传）
+specs/
+
+# AI 协作约定文件（不上传）
+AGENTS.md
+CLAUDE.md
+
+# 人工验收环境（uat：库/数据/home + 真机技能镜像）
+uat/
+
+# 本地工具缓存
+.cache/
+.playwright-cli/
+
+# 会话级工作数据
+.workbuddy/
+
+# 杂项
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

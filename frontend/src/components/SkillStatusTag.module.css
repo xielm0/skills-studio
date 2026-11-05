@@ -1,0 +1,23 @@
+/* 四态配色只用既有 token：未入库灰 → 已入库正文黑 → 已同步绿 → 有冲突红 */
+.tag {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.notInLibrary {
+  color: var(--c-status-off);
+}
+
+.inLibrary {
+  color: var(--c-text);
+}
+
+.synced {
+  color: var(--c-status-ok);
+}
+
+.conflict {
+  color: var(--c-status-error);
+}

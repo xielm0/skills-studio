@@ -1,0 +1,9 @@
+.root { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--c-border); font-size: 12px; color: var(--c-text-secondary); }
+.toolbar button { border: 0; border-radius: 6px; background: transparent; padding: 4px 8px; cursor: pointer; color: inherit; }
+.toolbar button:hover { background: var(--c-bg-hover); }
+.spacer { flex: 1; }
+.scroll { flex: 1; overflow: auto; padding: 12px; background: #ebeef2; }
+.page { margin: 0 auto 12px; width: 100%; min-height: 300px; background: white; box-shadow: 0 3px 8px rgba(0, 0, 0, .08); }
+.canvas { display: block; max-width: none; }
+.status { padding: 16px; color: var(--c-text-secondary); }

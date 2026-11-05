@@ -1,0 +1,326 @@
+/* 安装 Skills（T12）：五 Tab 共用结果表，市场逐项安装。 */
+
+.search {
+  width: 260px;
+}
+
+/* 扫描本机工具栏：状态 / 来源下拉。原生 select 撑满会挤掉搜索框，这里固定宽度 */
+.filterSelect {
+  flex: none;
+  width: 132px;
+}
+
+.pathHint {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+.stale {
+  flex: none;
+  margin: 0;
+  padding: 8px var(--s-6);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg-nav);
+  color: var(--c-text-secondary);
+  font-size: 12px;
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  max-width: 640px;
+  margin: 64px auto;
+  padding: 20px 24px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.errorTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-status-error);
+}
+
+.errorText {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+  word-break: break-word;
+}
+
+.table {
+  table-layout: fixed;
+}
+
+.table .checkCol {
+  width: 44px;
+  text-align: center;
+}
+
+.actionsCol {
+  text-align: center;
+}
+
+.menuAnchor {
+  position: relative;
+  display: inline-block;
+}
+
+.moreButton {
+  width: 30px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--c-text-secondary);
+  cursor: pointer;
+}
+
+.moreButton:hover { border-color: var(--c-border); background: var(--c-bg-hover); }
+
+.rowMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 110px;
+  padding: 4px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.rowMenu button {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowMenu button:hover { background: var(--c-bg-hover); }
+
+.checkCol input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--c-action);
+}
+
+.table .numCol {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.row {
+  cursor: default;
+}
+
+.rowSelected {
+  background: var(--c-bg-hover);
+}
+
+/* 名称列允许换行完整显示；描述列与 Skills 中心库一致：独立成列、按内容换行、不限行数 */
+.nameCell {
+  display: block;
+  word-break: break-word;
+}
+
+.nameLink {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.nameLink:hover { color: var(--c-action); text-decoration: underline; }
+
+.descLink {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.descLink:hover { color: var(--c-action); text-decoration: underline; }
+
+.descCell {
+  overflow: hidden;
+}
+
+.desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+  word-break: break-word;
+}
+
+/* 市场列表「来源」列：第一行渠道（含官方标记）、第二行安装量，各自单行省略 */
+.sourceLine {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--c-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.installLine {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-text-muted);
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  margin-top: 4px;
+}
+
+.badgeDanger {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: #fbecec;
+  color: var(--c-status-error);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.badgeScript {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: #fbf3e6;
+  color: #8a5a12;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reason {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+.failReason {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+/* 状态列：窄列居中（列宽由 colgroup 给，右侧不再留大片空白） */
+.table .statusCol {
+  text-align: center;
+}
+
+.stateError {
+  font-size: 13px;
+  color: var(--c-status-error);
+}
+
+.resultBar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px var(--s-6);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-bg-nav);
+}
+
+.resultSummary {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+}
+
+.failList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-status-error);
+}
+
+.footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 52px;
+  padding: 8px var(--s-6);
+  border-top: 1px solid var(--c-border);
+}
+
+.marketLabel {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: var(--r-md);
+  background: var(--c-bg-hover);
+  font-size: 13px;
+}
+
+.marketStatus {
+  flex: none;
+  margin: 0;
+  padding: 7px var(--s-6);
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-text-secondary);
+  font-size: 12px;
+}
+
+/* 市场列表行内安装结果：描述列下方一行，成功绿、失败/冲突红 */
+.rowNotice {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.rowNoticeOk { color: var(--c-status-ok); }
+
+.rowNoticeError { color: var(--c-status-error); }

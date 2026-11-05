@@ -1,0 +1,43 @@
+/* 视觉 token：严格对应 specs/design.md「基础视觉值」与「字体层级」 */
+:root {
+  /* 背景与边界 */
+  --c-bg: #ffffff;
+  --c-bg-nav: #faf9f8;
+  --c-bg-hover: #f2f1f0;
+  --c-bg-selected: #ecebea;
+  --c-border: #e8e7e6;
+
+  /* 文字 */
+  --c-text: #202020;
+  --c-text-secondary: #6b6b6b;
+  --c-text-muted: #8c8c8c;
+
+  /* 操作与状态 */
+  --c-action: #171717;
+  --c-action-hover: #000000;
+  --c-status-ok: #159f76;
+  --c-status-off: #9a9a9a;
+  --c-status-error: #d94a4a;
+
+  /* 字体 */
+  --font-ui: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+  /* 间距（4px 基数） */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+
+  /* 圆角 */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+
+  /* 布局 */
+  --nav-w: 240px;
+  --file-w: 440px;
+  --row-h: 32px;
+  --control-h: 30px;
+}

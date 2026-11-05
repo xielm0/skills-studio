@@ -1,0 +1,238 @@
+/* 首次启动：无侧栏的单列引导页（ui.md「首次启动」）。 */
+.root {
+  height: 100%;
+  overflow: auto;
+  background: var(--c-bg);
+}
+
+.sheet {
+  width: 760px;
+  max-width: calc(100% - 64px);
+  margin: 0 auto;
+  padding: 64px 0 48px;
+}
+
+.welcome {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--c-text);
+}
+
+.lead {
+  margin-top: var(--s-2);
+  font-size: 14px;
+  color: var(--c-text-secondary);
+}
+
+.block {
+  margin-top: var(--s-6);
+}
+
+.blockTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.pathRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 28px;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detected {
+  margin-top: var(--s-4);
+  font-size: 13px;
+  color: var(--c-text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+
+.notice {
+  margin-top: var(--s-3);
+  font-size: 12px;
+  color: var(--c-status-ok);
+}
+
+.error {
+  margin-top: var(--s-3);
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+.scanHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.scanCount {
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.selectAll {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 10px 0 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--c-border);
+}
+
+.listRow {
+  border-bottom: 1px solid var(--c-border);
+}
+
+.listRow:hover {
+  background: var(--c-bg-hover);
+}
+
+.listLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 10px 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.itemName {
+  flex: none;
+  max-width: 220px;
+  font-weight: 600;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemDesc {
+  /* 描述至少占半行宽（与中心库列表口径一致），其余元素先占固定宽度 */
+  flex: 1 1 50%;
+  min-width: 0;
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemFrom {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.itemTag {
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--c-bg-hover);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--c-text-secondary);
+}
+
+.scanFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-top: var(--s-3);
+}
+
+.selectedCount {
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+.scanFooterActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.result {
+  margin-top: var(--s-4);
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+}
+
+.resultSummary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.failureList {
+  margin: var(--s-2) 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--c-status-error);
+}
+
+.resultHint {
+  margin-top: var(--s-2);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.resultActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--s-3);
+}
+
+.empty {
+  padding: 20px 0;
+  font-size: 13px;
+  color: var(--c-text-secondary);
+}
+
+.emptyBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding-bottom: var(--s-3);
+}

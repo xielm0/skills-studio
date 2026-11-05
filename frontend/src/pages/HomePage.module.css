@@ -1,0 +1,57 @@
+/* 主页近期动态：整行可点击，行内不另设「打开」按钮（ui.md）。 */
+.activityList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.activityList > li + li {
+  border-top: 1px solid var(--c-border);
+}
+
+.activityRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  background: var(--c-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.activityRow:hover {
+  background: var(--c-bg-hover);
+}
+
+.activityName {
+  flex: none;
+  max-width: 240px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityText {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityTime {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,600 @@
+.sectionHeadRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.sectionMeta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+/* 计数只在 meta 行出现一次，数字加深、标签淡化（ui.md「界面文案」L2） */
+.sectionMeta b {
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.metaSep {
+  margin: 0 6px;
+  color: var(--c-border);
+}
+
+/* 分组标题承载存在性状态，卡片内不再重复（ui.md「状态表达」） */
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+
+.groupHeadCollapsed {
+  margin-bottom: 0;
+}
+
+.groupToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.groupChevron {
+  display: inline-flex;
+  color: var(--c-text-muted);
+  transition: transform 150ms ease;
+}
+
+.groupToggle[aria-expanded='false'] .groupChevron {
+  transform: rotate(-90deg);
+}
+
+.groupTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text-secondary);
+}
+
+.groupCount {
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.group + .group {
+  margin-top: var(--s-4);
+}
+
+/* 单行区块标题 + 右侧操作 */
+.sectionHeadLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+}
+
+/* 与页面可用宽度一起伸缩，默认窗口也能完整容纳三列。 */
+.agentGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+
+.agentGrid[hidden] {
+  display: none;
+}
+
+.agentCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.agentHead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* 内置 Agent 使用品牌图标，自定义 Agent 使用中性标记。 */
+.agentMark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--c-bg-hover);
+  color: var(--c-text-secondary);
+}
+
+.agentLogo {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.agentName {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentTag {
+  flex: none;
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+
+/* 启用开关：30×16 胶囊 + 12px 圆点；关闭态为次级底色（design.md 状态色） */
+.switch {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--c-bg-selected);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.switchOn {
+  background: var(--c-status-ok);
+}
+
+.knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(32, 32, 32, 0.2);
+  transition: left 120ms ease;
+}
+
+.switchOn .knob {
+  left: 16px;
+}
+
+.agentPathRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.agentPath {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 改路径是低频动作，收成图标按钮：不与名称、开关抢视觉 */
+.agentEdit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.agentEdit:hover:not(:disabled) {
+  background: var(--c-bg-hover);
+  color: var(--c-text);
+}
+
+.libraryLabel {
+  flex: none;
+}
+
+.libraryControls {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.libraryPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+.path {
+  margin-top: var(--s-3);
+  padding: 8px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-text);
+  word-break: break-all;
+}
+
+/* 只留产品版本，不上运行环境（ui.md「界面文案」） */
+.footerMeta {
+  margin-top: var(--s-6);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+/* 应用自更新：版本行右侧的状态与动作（ui.md「状态表达」——只陈述状态 + 一个按钮） */
+.updateArea {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-top: var(--s-6);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.updateArea .footerMeta {
+  margin-top: 0;
+}
+
+.updateStatus {
+  color: var(--c-text-muted);
+}
+
+.updateStatusError {
+  color: var(--c-status-error);
+}
+
+/* ---------- 提示 ---------- */
+
+.errorBanner {
+  margin-bottom: var(--s-3);
+  padding: 8px 12px;
+  border: 1px solid rgba(217, 74, 74, 0.35);
+  border-radius: var(--r-md);
+  background: rgba(217, 74, 74, 0.06);
+  font-size: 12px;
+  color: var(--c-status-error);
+}
+
+.noticeBanner {
+  margin-bottom: var(--s-3);
+  padding: 8px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+}
+
+/* ---------- 供应商 ---------- */
+
+.providerList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.providerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 14px;
+}
+
+.providerRow + .providerRow {
+  border-top: 1px solid var(--c-border);
+}
+
+.providerRow:hover {
+  background: var(--c-bg-hover);
+}
+
+.radioLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.providerName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.providerUrl {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerMeta {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.keyState {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.keyOk {
+  color: var(--c-status-ok);
+}
+
+/* 行内操作：编辑 / 删除。删除只把文字改成错误色，沿用 .btn 的边框与底色 */
+.providerActions {
+  display: flex;
+  flex: none;
+  gap: var(--s-2);
+}
+
+.providerActions .btnDanger {
+  color: var(--c-status-error);
+}
+
+/* 供应商弹窗内的模型清单：一行一个模型 ID，选中即算这一行填好 */
+.modelRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.modelRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+/* 输入框 + 候选列表上下排，列表展开时推开下面的行（弹窗 body 是 overflow:auto，浮层会被裁） */
+.modelField {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+/* 模型选择框：外观照「平台预设」下拉（圆角边框 + 右侧 ▾），但仍可手填清单外的 ID */
+.modelSelect {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.modelSelect:focus-within {
+  border-color: var(--c-text-muted);
+}
+
+.modelSelectInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--c-text);
+  outline: none;
+}
+
+.modelSelectInput::placeholder {
+  color: var(--c-text-muted);
+}
+
+.modelSelectCaret {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* 用 border 画三角：字符 ▾ 在这个字号下会退化成小点 */
+.modelSelectCaret::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  margin: -3px 0 0 -5px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--c-text);
+}
+
+.modelOptions {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 176px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.modelOption {
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.modelOption:hover {
+  background: var(--c-bg-hover);
+}
+
+.modelRowRemove {
+  flex: none;
+  height: var(--control-h);
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.modelRowRemove:hover {
+  color: var(--c-text);
+}
+
+/* 空态与列表同尺寸容器，加载前后不跳动；只陈述状态，不复述操作路径 */
+.providerEmpty {
+  padding: 18px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--c-text-muted);
+}
+
+/* ---------- 表单（弹层内） ---------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3) var(--s-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text-secondary);
+}
+
+.fieldHint {
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.inputWithButton {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.inputWithButton input {
+  flex: 1;
+  min-width: 0;
+}
+
+.movePaths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.moveLabel {
+  margin-top: var(--s-2);
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+
+.moveLabel:first-child {
+  margin-top: 0;
+}
+
+.moveWarn {
+  margin-top: var(--s-3);
+  padding: 8px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-nav);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+}
