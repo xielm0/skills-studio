@@ -42,6 +42,22 @@ export interface AppUpdateControls {
   installNow(): void;
 }
 
+/**
+ * 取 electron-updater 模块对象（同步；延迟到调用时才加载）。
+ *
+ * 必须走 CJS require：`autoUpdater` 在 electron-updater 的 exports 上由
+ * `Object.defineProperty(exports, 'autoUpdater', { get })` 惰性定义，Node 对 CJS
+ * 做命名导出静态分析时识别不到，`await import()` 的命名空间里只暴露 `default`。
+ * 解构 `const { autoUpdater } = await import(...)` 得到 undefined，装配随即在
+ * `deps.events.on` 处抛错——0.1.0/0.1.1 打包版「设置页没有检查更新」即此原因。
+ *
+ * 保留函数形式而不用顶层 import，是为了让 dev/uat 不付 electron-updater 的
+ * 模块加载开销（实测首次 require 约 138ms）。
+ */
+export function loadUpdaterModule(): typeof import('electron-updater') {
+  return require('electron-updater');
+}
+
 /** 未启用更新环境（dev/uat、未打包、安装包无 app-update.yml）的固定快照。 */
 export function unsupportedAppUpdateState(currentVersion: string): AppUpdateState {
   return { status: 'unsupported', currentVersion };

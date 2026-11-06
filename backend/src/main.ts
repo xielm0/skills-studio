@@ -13,7 +13,7 @@ import { selectBuiltinAgents } from './domain/agents';
 import { readAppState } from './domain/app-state';
 import type { AppInfoResult, AppPingResult, ConversationEvent } from './shared/ipc';
 import { CONVERSATION_EVENT_CHANNEL, UPDATE_EVENT_CHANNEL } from './shared/ipc';
-import { createAppUpdateService, type AppUpdateControls } from './domain/app-update';
+import { createAppUpdateService, loadUpdaterModule, type AppUpdateControls } from './domain/app-update';
 
 // 发布版按构建时的 CURRENT_ENV 运行；源码可用 --env 临时选择另一套隔离环境。
 const mode = selectEnv(app.isPackaged ? undefined : process.argv.find((arg) => arg.startsWith('--env='))?.slice(6));
@@ -2197,7 +2197,9 @@ app.whenReady().then(async () => {
   const updateConfigYml = path.join(process.resourcesPath, 'app-update.yml');
   if (app.isPackaged && mode === 'production' && fs.existsSync(updateConfigYml)) {
     try {
-      const { autoUpdater } = await import('electron-updater');
+      // 经 CJS require 取模块：autoUpdater 是 exports 上的惰性 getter，
+      // `await import()` 的命名空间拿不到它（详见 loadUpdaterModule 注释）。
+      const { autoUpdater } = loadUpdaterModule();
       updates = createAppUpdateService({
         events: autoUpdater,
         checkForUpdates: () => autoUpdater.checkForUpdates(),
