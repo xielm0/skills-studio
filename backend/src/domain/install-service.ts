@@ -19,6 +19,7 @@ import { AgentError } from './agents';
 import type { AgentConfigService } from './agents';
 import type { SkillLibraryService } from './library';
 import type { MarketService } from './market/market-service';
+import { SkillHubService, SKILLHUB_SOURCE, skillHubUrl } from './market/skillhub-service';
 import type { MarketItem, MarketItemRef } from './market/types';
 import { buildUpstreamUrl } from './market/parse';
 import type { SkillSourceService } from './sources/source-service';
@@ -64,6 +65,7 @@ export interface InstallServiceOptions {
   library: SkillLibraryService;
   sources: SkillSourceService;
   market: MarketService;
+  skillHub: SkillHubService;
   agents: AgentConfigService;
   logger?: { info(event: string, data?: unknown): void; error(event: string, data?: unknown): void };
   /** 同步落点记忆：扫描本机时按 Agent 整份重写 `<库>/agents-skills/<agentId>.skills` */
@@ -88,6 +90,7 @@ interface ChannelCache {
 }
 
 const CHANNELS: readonly InstallChannel[] = ['market', 'git', 'local', 'archive', 'scan'];
+type MarketProvider = 'skills.sh' | 'skillhub';
 const MAX_IMPORT_ITEMS = 300;
 
 function emptyCache(): ChannelCache {
@@ -108,6 +111,7 @@ export class InstallService {
   private readonly library: SkillLibraryService;
   private readonly sources: SkillSourceService;
   private readonly market: MarketService;
+  private readonly skillHub: SkillHubService;
   private readonly agents: AgentConfigService;
   private readonly logger: InstallServiceOptions['logger'];
   private readonly placement: PlacementStore | undefined;
@@ -119,6 +123,7 @@ export class InstallService {
     archive: emptyCache(),
     scan: emptyCache(),
   };
+  private skillHubCache = emptyCache();
 
   /** 用户通过系统选择器选过的目录 / 文件（只增不减，进程生命周期内有效） */
   private readonly allowedDirs = new Set<string>();
@@ -134,6 +139,7 @@ export class InstallService {
     this.library = opts.library;
     this.sources = opts.sources;
     this.market = opts.market;
+    this.skillHub = opts.skillHub;
     this.agents = opts.agents;
     this.logger = opts.logger;
     this.placement = opts.placement;
@@ -185,25 +191,26 @@ export class InstallService {
 
   // ────────────────────────── 市场 ──────────────────────────
 
-  async marketLeaderboard(force = false): Promise<InstallMarketListResult> {
-    const result = await this.market.getLeaderboard('all-time', { refresh: force });
-    return this.cacheMarketList(result, result.items, undefined);
+  async marketLeaderboard(force = false, provider: MarketProvider = 'skills.sh'): Promise<InstallMarketListResult> {
+    const result = provider === 'skillhub' ? await this.skillHub.getLeaderboard() : await this.market.getLeaderboard('all-time', { refresh: force });
+    return this.cacheMarketList(provider, result, result.items, undefined);
   }
 
-  async marketSearch(query: string, force = false): Promise<InstallMarketListResult> {
-    const result = await this.market.searchSkills(query, { refresh: force });
-    return this.cacheMarketList(result, result.items, result.query);
+  async marketSearch(query: string, force = false, provider: MarketProvider = 'skills.sh'): Promise<InstallMarketListResult> {
+    const result = provider === 'skillhub' ? await this.skillHub.searchSkills(query) : await this.market.searchSkills(query, { refresh: force });
+    return this.cacheMarketList(provider, result, result.items, result.query);
   }
 
   /** 简介查询兼容接口；当前市场列表不调用。 */
   marketDescription(source: string, skillId: string): Promise<InstallMarketDescriptionResult> {
+    if (source === SKILLHUB_SOURCE) return this.skillHub.getDetail({ source, skillId }).then((detail) => ({ text: detail.description, source: 'description', stale: false }));
     return this.market.getListingDescription({ source, skillId });
   }
 
   /** 市场条目文件信息：文件清单 / 总大小 / 可执行脚本。 */
   async marketPreview(req: InstallMarketPreviewRequest): Promise<InstallMarketPreviewResult> {
     const resolved = this.resolveMarketRef(req);
-    const detail = await this.market.getDetail(resolved.ref);
+    const detail = await (resolved.ref.source === SKILLHUB_SOURCE ? this.skillHub : this.market).getDetail(resolved.ref);
     const result: InstallMarketPreviewResult = {
       key: resolved.key,
       itemId: detail.item.id,
@@ -227,13 +234,13 @@ export class InstallService {
 
   /** 市场详情页只读文件内容，来源和路径由市场服务按文件树校验。 */
   marketReadFile(source: string, skillId: string, relativePath: string): Promise<InstallMarketReadFileResult> {
-    return this.market.getFileContent({ source, skillId }, relativePath);
+    return (source === SKILLHUB_SOURCE ? this.skillHub : this.market).getFileContent({ source, skillId }, relativePath);
   }
 
   private resolveMarketRef(req: InstallMarketPreviewRequest): { key: string; ref: MarketItemRef } {
     const key = typeof req?.key === 'string' ? req.key.trim() : '';
     if (key.length > 0) {
-      const entry = this.caches.market.entries.get(key);
+      const entry = this.marketCacheForKey(key)?.entries.get(key);
       if (!entry?.marketRef) {
         throw new AgentError('BAD_REQUEST', '市场列表已更新，请重新加载榜单或搜索后再试');
       }
@@ -248,6 +255,7 @@ export class InstallService {
   }
 
   private cacheMarketList(
+    provider: MarketProvider,
     result: {
       items: MarketItem[];
       stale: boolean;
@@ -259,18 +267,21 @@ export class InstallService {
     items: MarketItem[],
     query: string | undefined,
   ): InstallMarketListResult {
-    // 榜单/搜索换代：旧 key 全部失效，冲突保留内容随之释放
-    this.releaseMarketConflict();
-    const cache = this.replaceCache('market');
+    // 每个市场独立换代；另一市场的迟到响应不能使当前页面的 key 失效。
+    for (const key of this.marketConflicts.keys()) {
+      if (key.startsWith(`market:${provider}:`)) this.releaseMarketConflict(key);
+    }
+    const cache = this.replaceMarketCache(provider);
     const views: InstallMarketItem[] = [];
     items.forEach((item, index) => {
-      const key = `market:${cache.generation}:${index}`;
+      const key = `market:${provider}:${cache.generation}:${index}`;
       const entry: CachedEntry = {
         key,
         name: item.name,
         marketRef: {
           source: item.source,
           skillId: item.skillId,
+          publisher: item.publisher,
           name: item.name,
           installs: item.installs,
           isOfficial: item.isOfficial,
@@ -306,6 +317,18 @@ export class InstallService {
       fromCache: result.fromCache,
     });
     return view;
+  }
+
+  private marketCacheForKey(key: string): ChannelCache | null {
+    if (key.startsWith('market:skills.sh:')) return this.caches.market;
+    if (key.startsWith('market:skillhub:')) return this.skillHubCache;
+    return null;
+  }
+
+  private replaceMarketCache(provider: MarketProvider): ChannelCache {
+    if (provider === 'skills.sh') return this.replaceCache('market');
+    this.skillHubCache = { generation: this.skillHubCache.generation + 1, entries: new Map() };
+    return this.skillHubCache;
   }
 
   // ────────────────────────── Git / 本地目录 / 压缩包 ──────────────────────────
@@ -484,11 +507,13 @@ export class InstallService {
     const skillId = this.library.listSkills().find((item) => item.dirName === dirName)?.skillId ?? null;
     if (req.choice === 'skip') return { status: 'skipped', skillId };
     if (req.choice !== 'overwrite') throw new AgentError('BAD_REQUEST', '未知的处理方式');
-    const entry = this.caches.market.entries.get(key);
-    const origin = entry?.marketRef ? buildUpstreamUrl(entry.marketRef.source, entry.marketRef.skillId) : '';
+    const entry = this.marketCacheForKey(key)?.entries.get(key);
+    const origin = entry?.marketRef ? entry.marketRef.source === SKILLHUB_SOURCE
+      ? skillHubUrl(entry.marketRef.skillId, entry.marketRef.publisher) : buildUpstreamUrl(entry.marketRef.source, entry.marketRef.skillId) : '';
+    const hubVersion = entry?.marketRef?.source === SKILLHUB_SOURCE ? entry.marketRef.version : undefined;
     const result = await this.sources.replaceFromScan(dir, dirName, req.sourceHash, req.targetHash, {
       eventLabel: '用技能市场版本覆盖',
-      ...(origin.length > 0 ? { source: { origin } } : {}),
+      ...(origin.length > 0 ? { source: { origin, ...(hubVersion ? { sourceRelPath: '.', sourceRevision: hubVersion } : {}) } } : {}),
     });
     this.releaseMarketConflict(key);
     return { status: 'overwritten', skillId: result.skillId };
@@ -721,7 +746,7 @@ export class InstallService {
       throw new AgentError('BAD_REQUEST', `一次最多导入 ${MAX_IMPORT_ITEMS} 项`);
     }
 
-    const cache = this.caches[channel as InstallChannel];
+    const cache = channel === 'market' ? null : this.caches[channel as InstallChannel];
     const known: CachedEntry[] = [];
     const unknown: string[] = [];
     const seen = new Set<string>();
@@ -730,7 +755,7 @@ export class InstallService {
       if (key.length === 0) throw new AgentError('BAD_REQUEST', '每一项都需要 key');
       if (seen.has(key)) continue;
       seen.add(key);
-      const entry = cache.entries.get(key);
+      const entry = channel === 'market' ? this.marketCacheForKey(key)?.entries.get(key) : cache?.entries.get(key);
       if (entry) {
         if (channel === 'git' && typeof raw.name === 'string' && entry.importItem) {
           known.push({ ...entry, importItem: { ...entry.importItem, nameOverride: raw.name } });
@@ -777,7 +802,7 @@ export class InstallService {
         key,
         name: key,
         status: 'failed',
-        reason: '扫描结果已更新，请重新扫描后再导入',
+        reason: channel === 'market' ? '市场列表已更新，请重新加载榜单或搜索后再试' : '扫描结果已更新，请重新扫描后再导入',
         code: 'STALE_SCAN',
       });
     }
@@ -797,7 +822,8 @@ export class InstallService {
       }
       refs.push(entry.marketRef);
     }
-    const batch = await this.market.installItems(refs);
+    const batch = refs[0]?.source === SKILLHUB_SOURCE
+      ? await this.skillHub.installItems(refs) : await this.market.installItems(refs);
     // 冲突项的已下载内容由市场服务保留下来：登记后「查看差异 / 覆盖」直接读它，不重新下载
     for (const kept of batch.retained ?? []) {
       const index = batch.results.findIndex((result) => result.itemId === kept.itemId);
@@ -906,5 +932,6 @@ export class InstallService {
       }
       cache.entries.clear();
     }
+    this.skillHubCache.entries.clear();
   }
 }

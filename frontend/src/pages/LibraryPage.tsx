@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentView,
   LibraryFacetsResult,
@@ -338,9 +338,6 @@ function SkillTable({
                   </div>
                   {row.missingName ? <span className={s.badge}>缺少 name</span> : null}
                   {row.missing ? <span className={s.badgeDanger}>已丢失</span> : null}
-                  {row.updateCheckStatus ? <span className={s.badgeDanger} title={row.updateCheckError}>
-                    {row.updateCheckStatus === 'source-missing' ? '来源失效' : '检查失败'}
-                  </span> : null}
                   {rowNotice?.skillId === row.skillId ? (
                     <span className={s.rowNotice} role="status" title={rowNotice.text}>
                       {rowNotice.text}
@@ -517,9 +514,6 @@ function SkillGrid({
                 <button type="button" className={s.cardLink} onClick={() => handlers.onOpen(row)} title={row.name}>{row.name}</button>
               </h3>
               {row.updateAvailable ? <span className={s.badgeUpdate}>有更新</span> : null}
-              {row.updateCheckStatus ? <span className={s.badgeDanger} title={row.updateCheckError}>
-                {row.updateCheckStatus === 'source-missing' ? '来源失效' : '检查失败'}
-              </span> : null}
               <span className={s.cardSpacer} />
               <div className={s.menuAnchor}>
                 <button
@@ -625,7 +619,9 @@ function SkillGrid({
 
 /* ────────────────────────── 页面 ────────────────────────── */
 
-export function LibraryPage() {
+export function LibraryPage({ folder }: { folder: string }) {
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
   const [rows, setRows] = useState<LibrarySkillRow[] | null>(null);
   const [facets, setFacets] = useState<LibraryFacetsResult | null>(null);
   const [agents, setAgents] = useState<AgentView[]>([]);
@@ -662,6 +658,19 @@ export function LibraryPage() {
 
   const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
 
+  // 文件夹切换只重置当前列表状态，不重新执行首次进入时的全库对账与来源检查。
+  useLayoutEffect(() => {
+    setRows(null);
+    setFacets(null);
+    setQuery('');
+    setFilters(EMPTY_FILTERS);
+    setSelected(new Set());
+    setMulti(false);
+    setMenuFor(null);
+    setGroupFor(null);
+    setAgentFor(null);
+  }, [folder]);
+
   // 打开中心库时先对账库内目录，再检查来源变化；检查只读，列表随后显示更新状态。
   useEffect(() => {
     let alive = true;
@@ -669,10 +678,9 @@ export function LibraryPage() {
       await request('library:rescan');
       if (!alive) return;
       refresh();
-      const checked = await request('library:checkUpdates');
+      await request('library:checkUpdates');
       if (!alive) return;
       setCheckingUpdates(false);
-      if (!checked.ok) setNotice((current) => current ?? `检查来源更新失败：${errorText(checked.error)}`);
       refresh();
     })();
     return () => {
@@ -690,13 +698,14 @@ export function LibraryPage() {
   useEffect(() => {
     let alive = true;
     const filter = {
+      folder,
       query: query.trim() || undefined,
       group: filters.group || undefined,
       sourceType: filters.sourceType || undefined,
       agentId: filters.agentId || undefined,
     };
     void request('library:list', filter).then((result) => {
-      if (!alive) return;
+      if (!alive || folderRef.current !== folder) return;
       if (result.ok) {
         setRows(result.data.items);
         setError(null);
@@ -708,19 +717,19 @@ export function LibraryPage() {
     return () => {
       alive = false;
     };
-  }, [query, filters, reloadKey]);
+  }, [folder, query, filters, reloadKey]);
 
   useEffect(() => {
     let alive = true;
-    void Promise.all([request('library:facets'), request('agents:list')]).then(([facetResult, agentsResult]) => {
-      if (!alive) return;
+    void Promise.all([request('library:facets', { folder }), request('agents:list')]).then(([facetResult, agentsResult]) => {
+      if (!alive || folderRef.current !== folder) return;
       if (facetResult.ok) setFacets(facetResult.data);
       if (agentsResult.ok) setAgents(agentsResult.data.agents);
     });
     return () => {
       alive = false;
     };
-  }, [reloadKey]);
+  }, [folder, reloadKey]);
 
   // 筛选变化后只保留当前可见的选中项（ui.md：批量操作仅作用于已选项）
   useEffect(() => {
@@ -1034,7 +1043,7 @@ export function LibraryPage() {
         setNotice(`「${row.name}」的技能目录已丢失，无法打开详情`);
         return;
       }
-      navigateSkill(row.skillId);
+      navigateSkill(row.skillId, folder);
     },
     onMenu: (row, open) => {
       setMenuFor(open ? row.skillId : null);
@@ -1064,7 +1073,7 @@ export function LibraryPage() {
     onToggleSelected: toggleSelected,
   };
 
-  const total = facets?.total ?? rows?.length ?? null;
+  const total = rows?.length ?? null;
 
   return (
     <section className={`${c.page} ${c.boundedPage}`}>
@@ -1258,9 +1267,9 @@ export function LibraryPage() {
         ) : rows.length === 0 ? (
           <div className={s.tableEmpty}>
             <EmptyState
-              title={hasFilters ? '没有符合条件的 Skills' : '暂无 Skills'}
+              title={hasFilters ? '没有符合条件的 Skills' : folder ? '此文件夹暂无 Skills' : '暂无 Skills'}
               desc={
-                hasFilters ? undefined : '从「安装 Skills」导入，或在「Agents」中收录本机技能。'
+                hasFilters || folder ? undefined : '从「安装 Skills」导入，或在「Agents」中收录本机技能。'
               }
             />
           </div>

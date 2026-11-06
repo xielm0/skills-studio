@@ -761,8 +761,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
     /* ────────────────────────── T11：Skills 中心库 ────────────────────────── */
 
     'library:list': (payload: LibraryListRequest): LibraryListResult => {
+      const folder = (payload as { folder?: unknown } | undefined)?.folder;
+      if (folder !== undefined && typeof folder !== 'string') {
+        throw new AgentError('BAD_REQUEST', '参数 folder 必须是字符串');
+      }
       const filter: LibraryListRequest = {
         query: optionalString(payload, 'query'),
+        folder,
         group: optionalString(payload, 'group'),
         sourceType: optionalString(payload, 'sourceType'),
         origin: optionalString(payload, 'origin'),
@@ -771,7 +776,15 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
       return context.catalog.list(filter);
     },
 
-    'library:facets': () => context.catalog.facets(),
+    'library:folders': async () => ({ folders: await context.library.listFolders() }),
+
+    'library:facets': (payload) => {
+      const folder = (payload as { folder?: unknown } | undefined)?.folder;
+      if (folder !== undefined && typeof folder !== 'string') {
+        throw new AgentError('BAD_REQUEST', '参数 folder 必须是字符串');
+      }
+      return context.catalog.facets(folder);
+    },
 
     'library:checkUpdates': async () => {
       await context.updates.checkAll();
@@ -1269,13 +1282,17 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     'install:marketLeaderboard': (payload: InstallMarketLeaderboardRequest): Promise<InstallMarketListResult> => {
       const force = (payload as { force?: unknown } | undefined)?.force === true;
-      return context.install.marketLeaderboard(force);
+      const provider = (payload as { provider?: unknown } | undefined)?.provider;
+      if (provider != null && provider !== 'skills.sh' && provider !== 'skillhub') throw new AgentError('BAD_REQUEST', '未知技能市场');
+      return context.install.marketLeaderboard(force, provider ?? 'skills.sh');
     },
 
     'install:marketSearch': (payload: InstallMarketSearchRequest): Promise<InstallMarketListResult> => {
       const query = requireString(payload, 'query');
       const force = (payload as { force?: unknown }).force === true;
-      return context.install.marketSearch(query, force);
+      const provider = (payload as { provider?: unknown }).provider;
+      if (provider != null && provider !== 'skills.sh' && provider !== 'skillhub') throw new AgentError('BAD_REQUEST', '未知技能市场');
+      return context.install.marketSearch(query, force, provider ?? 'skills.sh');
     },
 
     'install:marketDescription': (payload: InstallMarketDescriptionRequest): Promise<InstallMarketDescriptionResult> => {

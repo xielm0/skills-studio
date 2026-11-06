@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { ActivityStore } from '../infra/activity-jsonl';
 import {
   SKILL_META_SCHEMA_VERSION,
+  SKILL_META_DIRNAME,
   ensureLibraryMeta,
   listMetaDirNames,
   migrateSkillMetaDirLayout,
@@ -24,6 +25,7 @@ import { SkillIndexStore, type SkillIndexRecord } from '../infra/sqlite-index';
 import type { WriteLock } from '../infra/write-lock';
 import { hashAndSizeSkillDir } from './content-hash';
 import { buildFileTree } from './file-tree';
+import { isSkillDir } from './frontmatter';
 import { sameOrigin } from './path-guard';
 import { generateSkillId } from './skill-id';
 import { scanSkillsDir } from './scanner';
@@ -100,6 +102,38 @@ export class SkillLibraryService {
   skillDirOf(dirName: string): string {
     const row = this.index.getByDirName(dirName);
     return skillsDirJoin(this.skillsDir, row?.relPath ?? dirName);
+  }
+
+  /** 按真实磁盘列出 skills/ 下的一层文件夹；异步读取，避免阻塞 Electron 主进程。 */
+  async listFolders(): Promise<string[]> {
+    try {
+      const entries = await fs.promises.readdir(this.skillsDir, { withFileTypes: true });
+      const names = await Promise.all(entries
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== SKILL_META_DIRNAME)
+        .map(async (entry) => {
+          const dir = path.join(this.skillsDir, entry.name);
+          try {
+            const children = await fs.promises.readdir(dir, { withFileTypes: true });
+            for (const file of children) {
+              if (file.name.toLowerCase() !== 'skill.md') continue;
+              if (file.isFile()) return null;
+              if (file.isSymbolicLink()) {
+                try {
+                  if ((await fs.promises.stat(path.join(dir, file.name))).isFile()) return null;
+                } catch {
+                  // 损坏的标记链接不是技能文件。
+                }
+              }
+            }
+            return entry.name;
+          } catch {
+            return null; // 目录在读取期间消失或不可读
+          }
+        }));
+      return names.filter((name): name is string => name !== null).sort((a, b) => a.localeCompare(b));
+    } catch {
+      return [];
+    }
   }
 
   /**

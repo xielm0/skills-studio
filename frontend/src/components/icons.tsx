@@ -40,6 +40,14 @@ export function LibraryIcon(props: IconProps) {
   );
 }
 
+export function FolderIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M2 4.5h4l1.4 1.7H14v6.3H2z" />
+    </Svg>
+  );
+}
+
 export function InstallIcon(props: IconProps) {
   return (
     <Svg {...props}>

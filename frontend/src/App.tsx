@@ -21,7 +21,9 @@ function renderPage(route: Route, info: AppInfoResult | null, failed: boolean) {
     case 'first-run':
       return <HomePage />;
     case 'library':
-      return route.skillId ? <SkillDetailPage skillId={route.skillId} /> : <LibraryPage />;
+      return route.skillId
+        ? <SkillDetailPage skillId={route.skillId} folder={route.query.get('folder') ?? undefined} />
+        : <LibraryPage folder={route.query.get('folder') ?? ''} />;
     case 'install':
       return <InstallPage market={route.market} marketKey={route.query.get('key')} installPreview={route.installPreview} />;
     case 'backup':
@@ -91,7 +93,7 @@ export default function App() {
 
   return (
     <div className={s.shell}>
-      <Sidebar active={route.id} activeSessionId={route.id === 'chat' ? route.query.get('session') : null} />
+      <Sidebar active={route.id} activeSessionId={route.id === 'chat' ? route.query.get('session') : null} libraryFolder={route.id === 'library' ? route.query.get('folder') : null} />
       <main className={s.workspace}>{renderPage(route, info, failed)}</main>
     </div>
   );

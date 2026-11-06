@@ -23,6 +23,7 @@ import { OverviewService } from './domain/overview';
 import { SkillRemovalService } from './domain/skill-removal';
 import { SkillSourceService } from './domain/sources';
 import { MarketService } from './domain/market/market-service';
+import { SkillHubService } from './domain/market/skillhub-service';
 import type { MarketHttpClient } from './domain/market/http';
 import { InstallService } from './domain/install-service';
 import { ConversationService } from './domain/agent/conversation-service';
@@ -334,7 +335,7 @@ export class AppContext {
     });
     library.setDeploymentProbe(deploy.createProbe());
     const updates = new SkillUpdateService({ library, agents: this.agents,
-      tempDir: this.tempDir, lock, logger: this.logger });
+      tempDir: this.tempDir, lock, logger: this.logger, marketHttp: this.marketHttp });
     const catalog = new SkillCatalogService({
       library,
       agents: this.agents,
@@ -367,10 +368,12 @@ export class AppContext {
       http: this.marketHttp,
       logger: this.logger,
     });
+    const skillHub = new SkillHubService({ tempDir: this.tempDir, sources, http: this.marketHttp });
     const install = new InstallService({
       library,
       sources,
       market,
+      skillHub,
       agents: this.agents,
       logger: this.logger,
       placement,

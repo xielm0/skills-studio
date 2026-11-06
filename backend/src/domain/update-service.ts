@@ -5,6 +5,8 @@ import * as path from 'node:path';
 import type { WriteLock } from '../infra/write-lock';
 import { readSkillMeta } from '../infra/fs-meta';
 import { gitCloneShallowAsync, gitRevision } from '../infra/git-clone';
+import { createFetchHttpClient, type MarketHttpClient } from './market/http';
+import { downloadSkillHubSnapshot, latestSkillHubRelease, skillHubRef, skillHubUrl } from './market/skillhub-service';
 import type { AgentConfigService } from './agents';
 import { hashAndSizeSkillDir, hashSkillDir, isIgnoredDirName, isIgnoredFileName } from './content-hash';
 import { isSkillDir } from './frontmatter';
@@ -14,7 +16,7 @@ import type { SkillMetadataFile, SkillSourceInfo } from './types';
 import type { LibrarySyncDiffResult } from '../shared/ipc';
 
 type UpdateState = { sourceKey: string; status: 'available' | 'up-to-date' | 'source-missing' | 'error'; error?: string };
-type SourceSnapshot = { skillDir: string; relPath: string; sourceHash: string; sourceRevision?: string; dispose(): void };
+type SourceSnapshot = { skillDir: string; relPath: string; sourceHash: string; sourceRevision?: string; sourceOrigin?: string; dispose(): void };
 type Preview = SourceSnapshot & { sourceKey: string; targetHash: string };
 type RepoSnapshot = { root: string; revision?: string; dispose(): void };
 
@@ -78,6 +80,7 @@ export class SkillUpdateService {
     agents: AgentConfigService;
     tempDir: string;
     lock: WriteLock;
+    marketHttp?: MarketHttpClient;
     logger?: { info(event: string, data?: unknown): void; error(event: string, data?: unknown): void };
   }) {}
 
@@ -105,45 +108,31 @@ export class SkillUpdateService {
 
   /** 列表仅读取内存检查结果；没有检查过不显示“有更新”。 */
   getState(skillId: string, source: SkillSourceInfo | null): UpdateState | null {
-    if (!source) return null;
+    if (!source || !this.supports(source)) return null;
     const state = this.states.get(skillId);
     return state?.sourceKey === sourceKey(source) ? state : null;
   }
 
-  /** 所有来源逐项检查，Git/市场同仓库只克隆一次。 */
+  /** 后台只查 SkillHub 列表元数据，不下载文件。 */
   checkAll(): Promise<void> {
     if (this.checking) return this.checking;
     const run = async () => {
-      const repositories = new Map<string, Promise<RepoSnapshot>>();
-      try {
-        for (const skill of this.opts.library.listSkills()) {
-          const meta = readSkillMeta(this.opts.library.skillsDir, skill.dirName);
-          if (!meta || !this.supports(meta.source)) continue;
-          try {
-            const source = await this.openSource(meta, repositories);
-            const baseline = meta.source.sourceHash ?? meta.contentHash;
-            this.states.set(skill.skillId, {
-              sourceKey: sourceKey(meta.source),
-              status: baseline && source.sourceHash !== baseline ? 'available' : 'up-to-date',
-            });
-          } catch (error) {
-            if (error instanceof UpdateError && (error.code === 'SOURCE_MANAGED' || error.code === 'SOURCE_LINKED')) {
-              this.states.delete(skill.skillId);
-              continue;
-            }
-            const detail = error instanceof Error ? error.message : String(error);
-            this.states.set(skill.skillId, {
-              sourceKey: sourceKey(meta.source),
-              status: error instanceof UpdateError && error.code === 'SOURCE_MISSING' ? 'source-missing' : 'error',
-              error: detail,
-            });
-          }
-          await new Promise<void>((resolve) => setImmediate(resolve));
+      for (const skill of this.opts.library.listSkills()) {
+        const meta = readSkillMeta(this.opts.library.skillsDir, skill.dirName);
+        if (!meta || !this.supports(meta.source)) continue;
+        try {
+          const ref = skillHubRef(meta.source.origin)!;
+          const release = await latestSkillHubRelease(ref.slug, this.opts.marketHttp ?? createFetchHttpClient());
+          this.states.set(skill.skillId, { sourceKey: sourceKey(meta.source),
+            status: (meta.source.sourceRevision && release.version !== meta.source.sourceRevision)
+              || (ref.publisher && release.publisher !== ref.publisher) ? 'available' : 'up-to-date' });
+        } catch (error) {
+          // 更新状态只显示“有更新”；检查不可用时清除旧状态，不在列表显示错误标签。
+          this.states.delete(skill.skillId);
+          this.opts.logger?.error('updates:check-item-failed', { skillId: skill.skillId,
+            error: error instanceof Error ? error.message : String(error) });
         }
-      } finally {
-        for (const repo of repositories.values()) {
-          try { (await repo).dispose(); } catch { /* 克隆失败时由调用者记录错误 */ }
-        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
     };
     this.checking = run().finally(() => { this.checking = null; });
@@ -153,6 +142,9 @@ export class SkillUpdateService {
   /** 打开“查看更新”时冻结来源快照，逐文件读取都针对同一版本。 */
   async getDiff(skillId: string, relPath?: string, expected?: { sourceHash: string; targetHash: string }): Promise<LibrarySyncDiffResult & { sourceHash: string; targetHash: string }> {
     const meta = this.requireMeta(skillId);
+    if (this.getState(skillId, meta.source)?.status !== 'available') {
+      throw new UpdateError('UPDATE_UNSUPPORTED', '当前没有确认可用的市场更新');
+    }
     let preview = this.previews.get(skillId);
     if (preview && relPath == null && expected == null) {
       preview.dispose();
@@ -174,6 +166,7 @@ export class SkillUpdateService {
       const targetHash = hashSkillDir(path.join(this.opts.library.skillsDir, meta.dirName));
       preview = { skillDir: frozenDir, relPath: source.relPath, sourceHash: hashSkillDir(frozenDir), targetHash,
         ...(source.sourceRevision ? { sourceRevision: source.sourceRevision } : {}),
+        ...(source.sourceOrigin ? { sourceOrigin: source.sourceOrigin } : {}),
         sourceKey: sourceKey(meta.source), dispose: () => fs.rmSync(frozenDir, { recursive: true, force: true }) };
       this.previews.set(skillId, preview);
     }
@@ -220,7 +213,7 @@ export class SkillUpdateService {
         const hashed = hashAndSizeSkillDir(target);
         const now = new Date().toISOString();
         this.opts.library.writeExternalMeta({ ...meta,
-          source: { ...meta.source, sourceRelPath: preview.relPath, sourceHash,
+          source: { ...meta.source, ...(preview.sourceOrigin ? { origin: preview.sourceOrigin } : {}), sourceRelPath: preview.relPath, sourceHash,
             ...(preview.sourceRevision ? { sourceRevision: preview.sourceRevision } : {}) },
           contentHash: hashed.hash, contentHashAt: now, sizeBytes: hashed.sizeBytes, updatedAt: now });
         await this.opts.library.rescan();
@@ -243,13 +236,12 @@ export class SkillUpdateService {
     });
   }
 
-  /** 仅市场、Git、本地和具体 Agent 来源可更新。 */
+  /** 仅支持有轻量版本元数据的市场；skills.sh 暂不提供更新检查。 */
   private supports(source: SkillSourceInfo): boolean {
-    return source.type === 'market' || source.type === 'git' || source.type === 'local-dir' ||
-      source.type.startsWith('agent:') || source.type === 'machine-scan' || source.type === 'agent-dir';
+    return source.type === 'market' && skillHubRef(source.origin) !== null;
   }
 
-  /** 从稳定 ID 读取当前元数据，拒绝压缩包及中心库自身来源。 */
+  /** 从稳定 ID 读取当前元数据，拒绝非市场来源。 */
   private requireMeta(skillId: string): SkillMetadataFile {
     const skill = this.opts.library.getSkillDetail(skillId);
     const meta = skill && readSkillMeta(this.opts.library.skillsDir, skill.dirName);
@@ -265,7 +257,17 @@ export class SkillUpdateService {
     let dispose: () => void = () => undefined;
     let marketSlug: string | null = null;
     let sourceRevision: string | undefined;
-    if (source.type === 'market' || source.type === 'git') {
+    let sourceOrigin: string | undefined;
+    const hubRef = source.type === 'market' ? skillHubRef(source.origin) : null;
+    if (hubRef) {
+      const http = this.opts.marketHttp ?? createFetchHttpClient();
+      const release = await latestSkillHubRelease(hubRef.slug, http);
+      sourceRevision = release.version;
+      sourceOrigin = skillHubUrl(hubRef.slug, release.publisher);
+      const snapshot = await downloadSkillHubSnapshot(hubRef.slug, this.opts.tempDir, http, sourceRevision, release.publisher);
+      root = snapshot.dir;
+      dispose = snapshot.dispose;
+    } else if (source.type === 'market' || source.type === 'git') {
       const market = source.type === 'market' ? marketRepository(source) : null;
       const url = market?.url ?? source.origin ?? '';
       marketSlug = market?.slug ?? null;
@@ -325,7 +327,7 @@ export class SkillUpdateService {
       if (!isSkillDir(skillDir)) throw new UpdateError('SOURCE_MISSING', '来源中已找不到该 Skill');
       const actualRel = path.relative(root, skillDir).split(path.sep).join('/') || '.';
       return { skillDir, relPath: actualRel, sourceHash: hashSkillDir(skillDir),
-        ...(sourceRevision ? { sourceRevision } : {}), dispose };
+        ...(sourceRevision ? { sourceRevision } : {}), ...(sourceOrigin ? { sourceOrigin } : {}), dispose };
     } catch (error) {
       dispose();
       if (error instanceof UpdateError) throw error;

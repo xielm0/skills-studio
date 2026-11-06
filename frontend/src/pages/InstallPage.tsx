@@ -48,6 +48,7 @@ const EMPTY_COPY: Record<InstallChannel, { title: string; desc?: string }> = {
 };
 
 type MarketMode = 'leaderboard' | 'search';
+type MarketProvider = 'skills.sh' | 'skillhub';
 
 /** 列表行的统一展示模型（市场与本地发现共用同一套行结构）。 */
 interface RowView {
@@ -266,6 +267,8 @@ function MarketDiffModal({ row, onClose, onResolved }: {
 export function InstallPage({ market, marketKey, installPreview }: { market?: { source: string; skillId: string }; marketKey?: string | null; installPreview?: { channel: InstallSourcePreviewChannel; key: string } }) {
   const [tab, setTab] = useState<InstallChannel>('market');
   const [tabs, setTabs] = useState<Record<InstallChannel, ChannelState>>(initialTabs);
+  const [marketProvider, setMarketProvider] = useState<MarketProvider>('skills.sh');
+  const marketStates = useRef<Record<MarketProvider, ChannelState>>({ 'skills.sh': initialState(), skillhub: initialState() });
   const [installingMarketKey, setInstallingMarketKey] = useState<string | null>(null);
   /** 详情页的安装提示（列表行提示见 marketRowNotice） */
   const [marketNotice, setMarketNotice] = useState('');
@@ -307,8 +310,8 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
       const searching = activeQuery.length > 0;
       patch('market', { loading: true, error: null, stale: false, warning: undefined, mode: searching ? 'search' : 'leaderboard', activeQuery });
       const result = searching
-        ? await request('install:marketSearch', { query: activeQuery, force })
-        : await request('install:marketLeaderboard', { force });
+        ? await request('install:marketSearch', { query: activeQuery, force, provider: marketProvider })
+        : await request('install:marketLeaderboard', { force, provider: marketProvider });
       if (requestId !== marketRequestId.current) return;
       if (!result.ok) {
         patch('market', {
@@ -333,12 +336,23 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
         fetchedAt: result.data.fetchedAt,
       });
     },
-    [patch],
+    [patch, marketProvider],
   );
+
+  function selectMarket(provider: MarketProvider) {
+    if (provider === marketProvider) return;
+    marketStates.current[marketProvider] = tabs.market;
+    const next = { ...marketStates.current[provider], items: [], selected: [], loaded: false, loading: true, error: null };
+    marketRequestId.current++;
+    lastMarketInput.current = null;
+    setTabs((previous) => ({ ...previous, market: next }));
+    setMarketProvider(provider);
+    setMarketRowNotice({});
+  }
 
   useEffect(() => {
     if (installingMarketKey !== null) return;
-    const inputKey = tabs.market.input;
+    const inputKey = `${marketProvider}:${tabs.market.input}`;
     if (lastMarketInput.current === inputKey) return;
     const timer = window.setTimeout(() => {
       lastMarketInput.current = inputKey;
@@ -346,7 +360,7 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
     }, tabs.market.input.trim() ? 450 : 0);
     marketTimer.current = timer;
     return () => window.clearTimeout(timer);
-  }, [tabs.market.input, loadMarket, installingMarketKey]);
+  }, [tabs.market.input, loadMarket, installingMarketKey, marketProvider]);
 
   const refreshInstalledMarket = useCallback(async () => {
     const result = await request('library:list', { sourceType: 'market' });
@@ -554,7 +568,9 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
   if (market) {
     const row = tabs.market.items.find((item) => item.source === market.source && item.skillId === market.skillId);
     const key = row?.key ?? marketKey ?? '';
-    const url = row?.url ?? `https://www.skills.sh/${market.source.includes('/') ? market.source : `site/${market.source}`}/${market.skillId}`;
+    const url = row?.url ?? (market.source === 'skillhub.cn'
+      ? `https://skillhub.cn/skills/${market.skillId}`
+      : `https://www.skills.sh/${market.source.includes('/') ? market.source : `site/${market.source}`}/${market.skillId}`);
     return <MarketSkillDetailPage
       source={market.source}
       skillId={market.skillId}
@@ -597,7 +613,8 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
       <div className={c.toolbar}>
         {tab === 'market' ? (
           <>
-            <span className={s.marketLabel}>{state.mode === 'search' ? '搜索结果' : '热门榜'}</span>
+            <button type="button" className={`${c.btn} ${marketProvider === 'skills.sh' ? c.btnPrimary : ''}`} onClick={() => selectMarket('skills.sh')}>skills.sh 热门榜</button>
+            <button type="button" className={`${c.btn} ${marketProvider === 'skillhub' ? c.btnPrimary : ''}`} onClick={() => selectMarket('skillhub')}>SkillHub 热门榜</button>
             <SearchField
               wrapperClassName={s.search}
               placeholder="搜索 Skills"
@@ -611,7 +628,7 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   if (marketTimer.current !== null) window.clearTimeout(marketTimer.current);
-                  lastMarketInput.current = state.input;
+                  lastMarketInput.current = `${marketProvider}:${state.input}`;
                   void loadMarket(state.input);
                 }
               }}
@@ -794,7 +811,7 @@ export function InstallPage({ market, marketKey, installPreview }: { market?: { 
                         {row.source}
                         {row.isOfficial ? ' · 官方' : ''}
                       </p>
-                      <p className={s.installLine}>安装量 {formatNumber(row.installs ?? 0)}</p>
+                      <p className={s.installLine}>{row.source === 'skillhub.cn' ? '下载量' : '安装量'} {formatNumber(row.installs ?? 0)}</p>
                     </td>
                     <td className={s.statusCol}><button type="button" className={c.btn} disabled={installingMarketKey !== null || installed} onClick={() => void importMarket(row)} data-testid="install-market-item">{installingMarketKey === row.key ? '安装中…' : installed ? '已入库' : '安装'}</button></td>
                     <td className={s.actionsCol}>

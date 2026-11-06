@@ -288,6 +288,32 @@ test('library:list 组合筛选 + facets（Group / 来源 / Agent）', async () 
   assert.equal(missing.total, 0);
 });
 
+test('中心库导航只显示一层文件夹，并按当前层列出文件夹名 Skill', async () => {
+  const dirs = makeDirs('folder-navigation');
+  writeSkill(path.join(dirs.lib, 'skills', 'root-skill'), 'frontmatter-root', '根目录技能');
+  writeSkill(path.join(dirs.lib, 'skills', 'docs', 'nested-skill'), 'frontmatter-nested', '文件夹技能');
+  fs.mkdirSync(path.join(dirs.lib, 'skills', 'empty-folder'), { recursive: true });
+  const localCtx = newContext(dirs);
+  const localHandlers = makeHandlers(localCtx, dirs);
+  try {
+    await localCtx.library.rescan();
+    assert.deepEqual((await localHandlers['library:folders'](undefined)).folders, ['docs', 'empty-folder']);
+    writeSkill(path.join(dirs.lib, 'skills', 'external-skill'), 'frontmatter-external', '尚未重扫的根目录技能');
+    fs.mkdirSync(path.join(dirs.lib, 'skills', 'external-folder'), { recursive: true });
+    assert.deepEqual((await localHandlers['library:folders'](undefined)).folders, ['docs', 'empty-folder', 'external-folder'],
+      '外部目录变动应直接按磁盘识别，不等待索引刷新');
+    assert.deepEqual(localHandlers['library:list']({ folder: '' }).items.map((row) => row.name), ['root-skill']);
+    assert.deepEqual(localHandlers['library:list']({ folder: 'docs' }).items.map((row) => row.name), ['nested-skill']);
+    assert.equal(localHandlers['library:list']({ folder: 'empty-folder' }).total, 0);
+    assert.equal(localHandlers['library:facets']({ folder: 'docs' }).total, 1);
+    assert.equal(localHandlers['library:facets']({ folder: '' }).total, 1);
+    assert.equal(localHandlers['library:list']({}).total, 2, '省略 folder 的现有调用仍查询全库');
+    assert.equal(localHandlers['library:list']({ folder: 'docs', query: 'frontmatter-nested' }).total, 0);
+  } finally {
+    localCtx.dispose();
+  }
+});
+
 // ────────────────────────── 详情与文件树 ──────────────────────────
 
 test('library:detail：72 文件真实树（references/scripts/assets 完整）', () => {

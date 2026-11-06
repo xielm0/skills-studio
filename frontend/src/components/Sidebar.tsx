@@ -8,6 +8,7 @@ import {
   BackupIcon,
   ChatIcon,
   EllipsisIcon,
+  FolderIcon,
   HomeIcon,
   InstallIcon,
   LibraryIcon,
@@ -60,16 +61,16 @@ function relativeLabel(iso: string, now: number): string {
   return `${Math.floor(diff / (365 * DAY))}年`;
 }
 
-function NavItem({ def, active }: { def: NavItemDef; active: boolean }) {
+function NavItem({ def, active, onClick, hideIcon = false }: { def: NavItemDef; active: boolean; onClick?: () => void; hideIcon?: boolean }) {
   return (
     <button
       type="button"
       className={`${s.item} ${active ? s.itemActive : ''}`}
       aria-current={active ? 'page' : undefined}
-      onClick={() => navigate(def.id)}
+      onClick={onClick ?? (() => navigate(def.id))}
       data-testid={`nav-${def.id}`}
     >
-      <span className={s.icon}>{def.icon}</span>
+      {hideIcon ? null : <span className={s.icon}>{def.icon}</span>}
       <span className={s.label}>{def.label}</span>
     </button>
   );
@@ -144,7 +145,9 @@ function SessionItem({
  * 左侧固定导航：主导航 + 可滚动会话列表 + 底部设置（design.md「导航、会话列表和分栏」）。
  * 会话列表真实读取 `conversation:list`，创建/运行状态变化时自动刷新（T15）。
  */
-export function Sidebar({ active, activeSessionId }: { active: RouteId; activeSessionId: string | null }) {
+export function Sidebar({ active, activeSessionId, libraryFolder }: { active: RouteId; activeSessionId: string | null; libraryFolder: string | null }) {
+  const [libraryExpanded, setLibraryExpanded] = useState(Boolean(libraryFolder));
+  const [libraryFolders, setLibraryFolders] = useState<string[]>([]);
   const [sessions, setSessions] = useState<ConversationListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   /** 会话行的「⋯」菜单：记录被点开的会话与弹出坐标（fixed，避免被列表滚动区裁剪） */
@@ -152,6 +155,26 @@ export function Sidebar({ active, activeSessionId }: { active: RouteId; activeSe
   const [actionError, setActionError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const reload = useRef<() => Promise<void>>(async () => undefined);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const result = await request('library:folders');
+      if (alive && result.ok) setLibraryFolders(result.data.folders);
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 30_000);
+    window.addEventListener('focus', load);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', load);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (libraryFolder) setLibraryExpanded(true);
+  }, [libraryFolder]);
 
   useEffect(() => {
     let alive = true;
@@ -241,9 +264,40 @@ export function Sidebar({ active, activeSessionId }: { active: RouteId; activeSe
   return (
     <aside className={s.sidebar}>
       <nav className={s.nav} aria-label="主导航">
-        {PRIMARY.map((def) => (
-          <NavItem key={def.id} def={def} active={active === def.id} />
-        ))}
+        {PRIMARY.map((def) => def.id === 'library' ? (
+          <div key={def.id}>
+            <div className={s.libraryNavRow}>
+              <button
+                type="button"
+                className={s.libraryToggle}
+                aria-label={libraryExpanded ? '折叠中心库文件夹' : '展开中心库文件夹'}
+                aria-expanded={libraryExpanded}
+                onClick={() => setLibraryExpanded((value) => !value)}
+                data-testid="library-folder-toggle"
+              >
+                <span className={libraryExpanded ? s.chevronOpen : s.chevron}>›</span>
+              </button>
+              <NavItem def={def} active={active === 'library' && !libraryFolder} onClick={() => navigate('library')} hideIcon />
+            </div>
+            {libraryExpanded ? (
+              <div className={s.libraryFolders} aria-label="中心库文件夹" data-testid="library-folders">
+                {libraryFolders.map((folder) => (
+                  <button
+                    key={folder}
+                    type="button"
+                    className={`${s.folderItem} ${active === 'library' && libraryFolder === folder ? s.itemActive : ''}`}
+                    aria-current={active === 'library' && libraryFolder === folder ? 'page' : undefined}
+                    title={folder}
+                    onClick={() => navigate('library', { folder })}
+                  >
+                    <FolderIcon size={16} />
+                    <span className={s.label}>{folder}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : <NavItem key={def.id} def={def} active={active === def.id} />)}
       </nav>
 
       <div className={s.divider} role="presentation" />

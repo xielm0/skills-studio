@@ -127,8 +127,9 @@ export function navigate(id: RouteId, query?: Record<string, string>): void {
 }
 
 /** 进入技能详情（T11：真实文件树 + 标签 + 编辑保存）。 */
-export function navigateSkill(skillId: string): void {
-  applyHash(`#/library/${encodeURIComponent(skillId)}`);
+export function navigateSkill(skillId: string, folder?: string): void {
+  const query = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+  applyHash(`#/library/${encodeURIComponent(skillId)}${query}`);
 }
 
 /** 从市场列表进入只读技能详情，key 供原有市场安装链路使用。 */

@@ -145,7 +145,7 @@ export class SkillCatalogService {
 
   /** 组合筛选：query（名称/描述）+ group + sourceType + agentId。 */
   list(filter: LibraryListRequest = {}): LibraryListResult {
-    const rows = this.rows();
+    const rows = this.rows(filter.folder);
     const query = (filter.query ?? '').trim().toLowerCase();
     const group = (filter.group ?? '').trim();
     const sourceType = (filter.sourceType ?? '').trim();
@@ -171,9 +171,9 @@ export class SkillCatalogService {
     return { items, total: items.length };
   }
 
-  /** 筛选可选值：Group / 来源 / 启用中的 Agent（计数按全库，不受当前筛选影响）。 */
-  facets(): LibraryFacetsResult {
-    const rows = this.rows();
+  /** 筛选可选值：Group / 来源 / 启用中的 Agent（计数按当前文件夹，不受其他筛选影响）。 */
+  facets(folder?: string): LibraryFacetsResult {
+    const rows = this.rows(folder);
     const groups = new Map<string, number>();
     const sources = new Map<string, { label: string; count: number }>();
     const agents = new Map<string, number>();
@@ -210,6 +210,7 @@ export class SkillCatalogService {
     const row = this.toRow(detail, this.agents.list());
     return {
       ...row,
+      name: detail.name,
       contentHash: detail.contentHash,
       sizeBytes: detail.sizeBytes,
       fileTree: detail.fileTree as SkillFileNode | null,
@@ -350,9 +351,16 @@ export class SkillCatalogService {
 
   // ────────────────────────── 内部 ──────────────────────────
 
-  private rows(): LibrarySkillRow[] {
+  private rows(folder?: string): LibrarySkillRow[] {
     const agents = this.agents.list();
-    return this.library.listSkills().map((s) => this.toRow(s, agents));
+    return this.library.listSkills()
+      .filter((skill) => {
+        if (folder === undefined) return true;
+        const slash = skill.relPath.indexOf('/');
+        return folder === '' ? slash < 0 : slash >= 0 && skill.relPath.slice(0, slash) === folder;
+      })
+      .sort((a, b) => a.dirName.localeCompare(b.dirName))
+      .map((s) => this.toRow(s, agents));
   }
 
   private toRow(skill: SkillSummary, agents: AgentInfo[]): LibrarySkillRow {
@@ -370,14 +378,12 @@ export class SkillCatalogService {
     return {
       skillId: skill.skillId,
       dirName: skill.dirName,
-      name: skill.name,
+      name: skill.dirName,
       description: skill.description,
       missingName: skill.missingName,
       groups: skill.groups,
       source,
       updateAvailable: update?.status === 'available',
-      ...(update?.status === 'source-missing' || update?.status === 'error'
-        ? { updateCheckStatus: update.status, updateCheckError: update.error } : {}),
       deployedAgents: skill.deployedAgents,
       configuredAgents: skill.configuredAgents ?? [],
       configuredNotDeployed: skill.configuredNotDeployed === true,

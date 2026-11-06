@@ -69,6 +69,8 @@ export interface MarketItem {
   source: string;
   /** 上游技能标识（仓库内目录名 / SKILL.md 的 name） */
   skillId: string;
+  /** SkillHub 下载所需的发布者命名空间（来自列表 homepage）。 */
+  publisher?: string;
   name: string;
   installs: number;
   isOfficial?: boolean;
@@ -84,6 +86,9 @@ export interface MarketItem {
 export interface MarketItemRef {
   source: string;
   skillId: string;
+  publisher?: string;
+  /** SkillHub 下载时固定的版本，供同名冲突覆盖后记录准确基线。 */
+  version?: string;
   name?: string;
   installs?: number;
   isOfficial?: boolean;

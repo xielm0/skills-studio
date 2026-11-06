@@ -447,6 +447,8 @@ export interface LibrarySkillRow {
 /** 组合筛选：query 匹配名称/描述；sourceType 支持原始类型或展示分类。 */
 export interface LibraryListRequest {
   query?: string;
+  /** 传入空串只列根目录；传入文件夹名只列该文件夹；省略则保持全库查询。 */
+  folder?: string;
   group?: string;
   sourceType?: string;
   /** 来源原始位置（Git 仓库 / 本地目录）；按 Windows 路径语义做同位置比较 */
@@ -454,9 +456,17 @@ export interface LibraryListRequest {
   agentId?: string;
 }
 
+export interface LibraryFacetsRequest {
+  folder?: string;
+}
+
 export interface LibraryListResult {
   items: LibrarySkillRow[];
   total: number;
+}
+
+export interface LibraryFoldersResult {
+  folders: string[];
 }
 
 export interface LibraryFacetCount {
@@ -919,12 +929,14 @@ export interface InstallMarketListResult {
 }
 
 export interface InstallMarketLeaderboardRequest {
+  provider?: 'skills.sh' | 'skillhub';
   /** true = 跳过缓存重新抓取（失败仍回退旧缓存并标 stale） */
   force?: boolean;
 }
 
 export interface InstallMarketSearchRequest {
   query: string;
+  provider?: 'skills.sh' | 'skillhub';
   force?: boolean;
 }
 
@@ -1676,7 +1688,8 @@ export interface IpcCommands {
 
   /* ---- T11：Skills 中心库与技能详情 ---- */
   'library:list': { request: LibraryListRequest; response: LibraryListResult };
-  'library:facets': { request: undefined; response: LibraryFacetsResult };
+  'library:folders': { request: undefined; response: LibraryFoldersResult };
+  'library:facets': { request: LibraryFacetsRequest | undefined; response: LibraryFacetsResult };
   'library:checkUpdates': { request: undefined; response: { checked: true } };
   'library:detail': { request: LibraryDetailRequest; response: LibraryDetailResult };
   'library:readFile': { request: LibraryReadFileRequest; response: LibraryReadFileResult };
@@ -1810,6 +1823,7 @@ export const IPC_CHANNELS = [
   'providers:saveKey',
   'providers:remove',
   'library:list',
+  'library:folders',
   'library:facets',
   'library:checkUpdates',
   'library:detail',
@@ -1916,6 +1930,7 @@ export const IMPLEMENTED_CHANNELS = [
   'providers:saveKey',
   'providers:remove',
   'library:list',
+  'library:folders',
   'library:facets',
   'library:checkUpdates',
   'library:detail',
@@ -2009,7 +2024,7 @@ export const NO_ARG_CHANNELS = [
   'agents:redetect',
   'providers:list',
   'settings:get',
-  'library:facets',
+  'library:folders',
   'library:checkUpdates',
   'install:agentScan',
   'library:rescan',

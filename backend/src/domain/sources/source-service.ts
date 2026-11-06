@@ -157,7 +157,7 @@ export class SkillSourceService {
     dirName: string,
     sourceHash: string,
     targetHash: string,
-    opts: { eventLabel?: string; source?: { origin: string; sourceRelPath?: string } } = {},
+    opts: { eventLabel?: string; source?: { origin: string; sourceRelPath?: string; sourceRevision?: string } } = {},
   ): Promise<{ skillId: string }> {
     const run = async () => {
       const src = path.resolve(sourcePath);
@@ -200,6 +200,7 @@ export class SkillSourceService {
           origin: opts.source.origin,
           importedAt: meta.source.importedAt,
           ...(opts.source.sourceRelPath == null ? {} : { sourceRelPath: opts.source.sourceRelPath }),
+          ...(opts.source.sourceRevision == null ? {} : { sourceRevision: opts.source.sourceRevision }),
           sourceHash: hash,
         };
         this.library.writeExternalMeta({ ...meta,
@@ -419,6 +420,7 @@ export class SkillSourceService {
     };
     const sourceRelPath = item.source.sourceRelPath ?? existingMeta.source.sourceRelPath;
     if (sourceRelPath != null) source.sourceRelPath = sourceRelPath;
+    if (item.source.sourceRevision != null) source.sourceRevision = item.source.sourceRevision;
     source.sourceHash = hashSkillDir(item.path);
     this.library.writeExternalMeta({ ...existingMeta, source });
     this.logger?.info('sources:market-source-adopted', {

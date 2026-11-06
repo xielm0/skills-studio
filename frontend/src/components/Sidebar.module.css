@@ -53,6 +53,79 @@
   color: var(--c-text);
 }
 
+.libraryNavRow {
+  display: flex;
+  align-items: center;
+}
+
+.libraryNavRow .item {
+  flex: 1;
+  min-width: 0;
+  padding-left: 2px;
+}
+
+.libraryToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: var(--row-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-secondary);
+  cursor: pointer;
+}
+
+.libraryToggle:hover {
+  background: var(--c-bg-hover);
+}
+
+.chevron,
+.chevronOpen {
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.libraryFolders {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.folderItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 36px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderItem:hover {
+  background: var(--c-bg-hover);
+}
+
+.folderItem.itemActive {
+  color: var(--c-text);
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;

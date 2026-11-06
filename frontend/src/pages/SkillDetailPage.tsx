@@ -80,11 +80,11 @@ export interface AgentSourceTarget {
   dirName: string;
 }
 
-export function SkillDetailPage({ skillId, agent }: { skillId?: string; agent?: AgentSourceTarget }) {
+export function SkillDetailPage({ skillId, agent, folder }: { skillId?: string; agent?: AgentSourceTarget; folder?: string }) {
   const sourceKey = agent ? `agent:${agent.agentId}/${agent.dirName}` : `library:${skillId ?? ''}`;
   const selfHash = agent
     ? `#/agent/${encodeURIComponent(agent.agentId)}/${encodeURIComponent(agent.dirName)}`
-    : `#/library/${encodeURIComponent(skillId ?? '')}`;
+    : `#/library/${encodeURIComponent(skillId ?? '')}${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`;
   const target = useMemo(
     () =>
       agent
@@ -306,7 +306,7 @@ export function SkillDetailPage({ skillId, agent }: { skillId?: string; agent?: 
           className={s.back}
           onClick={() => {
             if (agent) navigateToHash(`#/agents?agent=${encodeURIComponent(agent.agentId)}`);
-            else navigate('library');
+            else navigate('library', folder ? { folder } : undefined);
           }}
           data-testid="skill-back"
         >
