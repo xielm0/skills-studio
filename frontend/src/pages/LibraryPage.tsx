@@ -20,7 +20,7 @@ import c from '../styles/common.module.css';
 import s from './LibraryPage.module.css';
 
 type ViewMode = 'list' | 'grid';
-type MenuKey = 'edit' | 'evaluate' | 'report' | 'update' | 'delete';
+type MenuKey = 'move' | 'edit' | 'evaluate' | 'report' | 'update' | 'delete';
 
 interface Filters {
   group: string;
@@ -52,19 +52,73 @@ function useDismiss(open: boolean, close: () => void): void {
 /* ────────────────────────── 行内浮层 ────────────────────────── */
 
 function MenuPopover({
+  row,
   hasReport,
   updateAvailable,
+  showMove,
+  folders,
   onSelect,
+  onMove,
   onClose,
 }: {
+  row: LibrarySkillRow;
   hasReport: boolean;
   updateAvailable: boolean;
+  /** 库里有文件夹时才提供「移动到文件夹」（没有目标就没有入口） */
+  showMove: boolean;
+  folders: string[];
   onSelect: (key: MenuKey) => void;
+  onMove: (folder: string) => void;
   onClose: () => void;
 }) {
+  /** 子菜单紧贴「移动到文件夹」向右展开；悬停即开，点击可切换 */
+  const [moveOpen, setMoveOpen] = useState(false);
   useDismiss(true, onClose);
+  const currentFolder = row.relPath === row.dirName ? '' : row.relPath.slice(0, row.relPath.indexOf('/'));
   return (
     <div className={s.menu} data-popover="true" role="menu" data-testid="library-row-menu-popover">
+      {showMove ? (
+        <div className={s.submenuWrap}>
+          <button
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={moveOpen}
+            className={s.submenuTrigger}
+            onClick={() => setMoveOpen((value) => !value)}
+            onMouseEnter={() => setMoveOpen(true)}
+            data-testid="menu-move"
+          >
+            <span>移动到文件夹</span>
+            <span className={s.submenuArrow} aria-hidden="true">›</span>
+          </button>
+          {moveOpen ? (
+            <div className={s.submenu} role="menu" aria-label="选择文件夹" data-testid="menu-move-list">
+              <button
+                type="button"
+                role="menuitem"
+                disabled={currentFolder === ''}
+                onClick={() => onMove('')}
+                data-testid="move-target-root"
+              >
+                <span>根目录</span>
+              </button>
+              {folders.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  role="menuitem"
+                  disabled={currentFolder === name}
+                  onClick={() => onMove(name)}
+                  data-testid={`move-target-${name}`}
+                >
+                  <span>{name}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <button type="button" role="menuitem" onClick={() => onSelect('edit')} data-testid="menu-edit">
         优化
       </button>
@@ -193,6 +247,8 @@ interface RowHandlers {
   onAddGroup: (row: LibrarySkillRow, group: string) => void;
   onToggleAgent: (row: LibrarySkillRow, agentId: string, next: boolean) => void;
   onSelect: (key: MenuKey, row: LibrarySkillRow) => void;
+  /** 行菜单「移动到文件夹」：folder 空串 = 移回库根 */
+  onMove: (row: LibrarySkillRow, folder: string) => void;
   onToggleSelected: (skillId: string) => void;
 }
 
@@ -215,6 +271,10 @@ interface TableProps {
   menuFor: string | null;
   groupFor: string | null;
   agentFor: string | null;
+  /** 库里有文件夹时行菜单才出现「移动到文件夹」 */
+  hasFolders: boolean;
+  /** 「移动到文件夹」子菜单的候选（含库根） */
+  folders: string[];
   handlers: RowHandlers;
 }
 
@@ -267,6 +327,8 @@ function SkillTable({
   menuFor,
   groupFor,
   agentFor,
+  hasFolders,
+  folders,
   handlers,
 }: TableProps) {
   return (
@@ -447,9 +509,13 @@ function SkillTable({
                   </button>
                   {menuFor === row.skillId ? (
                     <MenuPopover
+                      row={row}
                       hasReport={row.hasReport}
                       updateAvailable={row.updateAvailable}
+                      showMove={hasFolders}
+                      folders={folders}
                       onSelect={(key) => handlers.onSelect(key, row)}
+                      onMove={(folder) => handlers.onMove(row, folder)}
                       onClose={() => handlers.onMenu(row, false)}
                     />
                   ) : null}
@@ -474,7 +540,11 @@ function SkillGrid({
   menuFor,
   groupFor,
   agentFor,
+  hasFolders,
+  folders,
 }: {
+  hasFolders: boolean;
+  folders: string[];
   rows: LibrarySkillRow[];
   agents: AgentView[];
   facets: LibraryFacetsResult | null;
@@ -527,9 +597,13 @@ function SkillGrid({
                 </button>
                 {menuFor === row.skillId ? (
                   <MenuPopover
+                    row={row}
                     hasReport={row.hasReport}
                     updateAvailable={row.updateAvailable}
+                    showMove={hasFolders}
+                    folders={folders}
                     onSelect={(key) => handlers.onSelect(key, row)}
+                    onMove={(folder) => handlers.onMove(row, folder)}
                     onClose={() => handlers.onMenu(row, false)}
                   />
                 ) : null}
@@ -631,6 +705,8 @@ export function LibraryPage({ folder }: { folder: string }) {
   const [multi, setMulti] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** 库内一层文件夹（「移动到文件夹」的候选；空数组时行菜单不出现该入口） */
+  const [folders, setFolders] = useState<string[]>([]);
   const [groupFor, setGroupFor] = useState<string | null>(null);
   const [agentFor, setAgentFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -721,10 +797,11 @@ export function LibraryPage({ folder }: { folder: string }) {
 
   useEffect(() => {
     let alive = true;
-    void Promise.all([request('library:facets', { folder }), request('agents:list')]).then(([facetResult, agentsResult]) => {
+    void Promise.all([request('library:facets', { folder }), request('agents:list'), request('library:folders')]).then(([facetResult, agentsResult, folderResult]) => {
       if (!alive || folderRef.current !== folder) return;
       if (facetResult.ok) setFacets(facetResult.data);
       if (agentsResult.ok) setAgents(agentsResult.data.agents);
+      if (folderResult.ok) setFolders(folderResult.data.folders);
     });
     return () => {
       alive = false;
@@ -1037,6 +1114,22 @@ export function LibraryPage({ folder }: { folder: string }) {
     }
   }
 
+  /** 执行移动：target 为空串 = 移回库根；成功后刷新列表，链接重建失败项如实提示。 */
+  async function moveSkillTo(row: LibrarySkillRow, target: string) {
+    setMenuFor(null);
+    const result = await request('library:moveSkill', { skillId: row.skillId, folder: target });
+    if (!result.ok) {
+      setNotice(`移动失败：${errorText(result.error)}`);
+      return;
+    }
+    const where = target.length > 0 ? `文件夹「${target}」` : '库根';
+    const failures = result.data.relinkFailures;
+    setNotice(failures.length > 0
+      ? `「${row.name}」已移到${where}，${failures.length} 个 Agent 链接未重建：${failures.map((item) => item.dirName).join('、')}`
+      : `「${row.name}」已移到${where}`);
+    refresh();
+  }
+
   const handlers: RowHandlers = {
     onOpen: (row) => {
       if (row.missing) {
@@ -1070,6 +1163,7 @@ export function LibraryPage({ folder }: { folder: string }) {
     onAddGroup: (row, group) => void addGroup(row, group),
     onToggleAgent: (row, agentId, next) => void toggleAgent(row, agentId, next),
     onSelect: handleMenu,
+    onMove: (row, folder) => void moveSkillTo(row, folder),
     onToggleSelected: toggleSelected,
   };
 
@@ -1287,6 +1381,8 @@ export function LibraryPage({ folder }: { folder: string }) {
             menuFor={menuFor}
             groupFor={groupFor}
             agentFor={agentFor}
+            hasFolders={folders.length > 0}
+            folders={folders}
             handlers={handlers}
           />
         ) : (
@@ -1301,6 +1397,8 @@ export function LibraryPage({ folder }: { folder: string }) {
             menuFor={menuFor}
             groupFor={groupFor}
             agentFor={agentFor}
+            hasFolders={folders.length > 0}
+            folders={folders}
           />
         )}
       </div>
@@ -1353,6 +1451,7 @@ export function LibraryPage({ folder }: { folder: string }) {
       ) : null}
 
       {/* 删除确认：含受管理链接数 */}
+
       {removePlan ? (
         <Modal
           title={removePlan.batch ? '批量删除 Skills' : '删除 Skill'}

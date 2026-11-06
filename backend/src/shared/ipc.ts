@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 主进程 ↔ 渲染层共享契约（tec.md §7.1、§9.2）。
  *
  * 约束：本文件只允许纯类型与常量，禁止 import node:/electron，
@@ -420,6 +420,8 @@ export interface LibrarySourceView {
 export interface LibrarySkillRow {
   skillId: string;
   dirName: string;
+  /** 技能相对 skills 根的位置（'/' 分隔；平铺 = dirName）。行菜单「移动到文件夹」据此判断当前所在文件夹 */
+  relPath: string;
   name: string;
   description: string;
   /** frontmatter 缺 name，名称回退目录名 */
@@ -467,6 +469,40 @@ export interface LibraryListResult {
 
 export interface LibraryFoldersResult {
   folders: string[];
+}
+
+/** 新建单层文件夹（`skills/<name>/`）。 */
+export interface LibraryFolderCreateRequest {
+  name: string;
+}
+
+export interface LibraryFolderCreateResult {
+  name: string;
+}
+
+/** 重命名单层文件夹：目录改名，技能 relPath 由重扫对账。 */
+export interface LibraryFolderRenameRequest {
+  from: string;
+  to: string;
+}
+
+/** 删除单层文件夹：里面的技能移到库根（变成未分组）。 */
+export interface LibraryFolderRemoveRequest {
+  name: string;
+}
+
+/** 把单个技能移动到某个文件夹（folder 为空串 = 移回库根）。 */
+export interface LibrarySkillMoveRequest {
+  skillId: string;
+  folder: string;
+}
+
+/** 文件夹改动结果：移动的技能数 + 未自动重建的 Agent 链接（空 = 全部重建成功）。 */
+export interface LibraryFolderMutateResult {
+  /** 改动后的文件夹名；remove 时为空字符串 */
+  name: string;
+  movedSkills: number;
+  relinkFailures: Array<{ dirName: string; agentName: string; reason: string }>;
 }
 
 export interface LibraryFacetCount {
@@ -1689,6 +1725,10 @@ export interface IpcCommands {
   /* ---- T11：Skills 中心库与技能详情 ---- */
   'library:list': { request: LibraryListRequest; response: LibraryListResult };
   'library:folders': { request: undefined; response: LibraryFoldersResult };
+  'library:createFolder': { request: LibraryFolderCreateRequest; response: LibraryFolderCreateResult };
+  'library:renameFolder': { request: LibraryFolderRenameRequest; response: LibraryFolderMutateResult };
+  'library:removeFolder': { request: LibraryFolderRemoveRequest; response: LibraryFolderMutateResult };
+  'library:moveSkill': { request: LibrarySkillMoveRequest; response: LibraryFolderMutateResult };
   'library:facets': { request: LibraryFacetsRequest | undefined; response: LibraryFacetsResult };
   'library:checkUpdates': { request: undefined; response: { checked: true } };
   'library:detail': { request: LibraryDetailRequest; response: LibraryDetailResult };
@@ -1824,6 +1864,10 @@ export const IPC_CHANNELS = [
   'providers:remove',
   'library:list',
   'library:folders',
+  'library:createFolder',
+  'library:renameFolder',
+  'library:removeFolder',
+  'library:moveSkill',
   'library:facets',
   'library:checkUpdates',
   'library:detail',
@@ -1931,6 +1975,10 @@ export const IMPLEMENTED_CHANNELS = [
   'providers:remove',
   'library:list',
   'library:folders',
+  'library:createFolder',
+  'library:renameFolder',
+  'library:removeFolder',
+  'library:moveSkill',
   'library:facets',
   'library:checkUpdates',
   'library:detail',

@@ -378,6 +378,7 @@ export class SkillCatalogService {
     return {
       skillId: skill.skillId,
       dirName: skill.dirName,
+      relPath: skill.relPath,
       name: skill.dirName,
       description: skill.description,
       missingName: skill.missingName,

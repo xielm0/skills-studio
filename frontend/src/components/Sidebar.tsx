@@ -145,9 +145,27 @@ function SessionItem({
  * 左侧固定导航：主导航 + 可滚动会话列表 + 底部设置（design.md「导航、会话列表和分栏」）。
  * 会话列表真实读取 `conversation:list`，创建/运行状态变化时自动刷新（T15）。
  */
+/**
+ * 右键菜单锚定光标：成熟软件（资源管理器 / VS Code）都在指针处弹出，
+ * 而不是贴行的边角；贴边时向左/向上翻转，避免被视口裁掉。
+ * 尺寸取文件夹菜单的最大情形（最长项「新建文件夹」约 90 宽、两项约 76 高）。
+ */
+function contextMenuPosition(event: { clientX: number; clientY: number }): { top: number; left: number } {
+  const MENU_WIDTH = 100;
+  const MENU_HEIGHT = 76;
+  return {
+    left: Math.max(4, Math.min(event.clientX, window.innerWidth - MENU_WIDTH)),
+    top: Math.max(4, Math.min(event.clientY, window.innerHeight - MENU_HEIGHT)),
+  };
+}
+
 export function Sidebar({ active, activeSessionId, libraryFolder }: { active: RouteId; activeSessionId: string | null; libraryFolder: string | null }) {
   const [libraryExpanded, setLibraryExpanded] = useState(Boolean(libraryFolder));
   const [libraryFolders, setLibraryFolders] = useState<string[]>([]);
+  /** 文件夹右键菜单：folder = null 表示「Skills 中心库」行本身；confirmRemove 为删除二次确认态 */
+  const [folderMenu, setFolderMenu] = useState<{ folder: string | null; top: number; left: number; confirmRemove?: boolean } | null>(null);
+  /** 内联输入：create 在列表末尾新增一行，rename 把目标行变成输入框 */
+  const [folderEdit, setFolderEdit] = useState<{ mode: 'create' | 'rename'; from: string; value: string } | null>(null);
   const [sessions, setSessions] = useState<ConversationListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   /** 会话行的「⋯」菜单：记录被点开的会话与弹出坐标（fixed，避免被列表滚动区裁剪） */
@@ -175,6 +193,50 @@ export function Sidebar({ active, activeSessionId, libraryFolder }: { active: Ro
   useEffect(() => {
     if (libraryFolder) setLibraryExpanded(true);
   }, [libraryFolder]);
+
+  /** 文件夹增删改后立即重拉侧边栏列表（listFolders 按磁盘实时枚举）。 */
+  const refreshFolders = useCallback(async () => {
+    const result = await request('library:folders');
+    if (result.ok) setLibraryFolders(result.data.folders);
+  }, []);
+
+  /** 提交内联输入：create 新建文件夹，rename 改名；失败把原因留在侧边栏提示条。 */
+  async function submitFolderEdit() {
+    const edit = folderEdit;
+    if (!edit) return;
+    const name = edit.value.trim();
+    if (name.length === 0) {
+      setFolderEdit(null);
+      return;
+    }
+    const result = edit.mode === 'create'
+      ? await request('library:createFolder', { name })
+      : await request('library:renameFolder', { from: edit.from, to: name });
+    if (!result.ok) {
+      setActionError(result.error?.detail ?? '操作失败');
+      return;
+    }
+    setFolderEdit(null);
+    await refreshFolders();
+    // 正在看这个文件夹时跟着改名，否则页面会停在一个已不存在的 folder 上
+    if (edit.mode === 'rename' && libraryFolder === edit.from) navigate('library', { folder: name });
+  }
+
+  /** 删除文件夹：技能由后端移到库根，再按原落点重建 Agent 链接；失败项逐条提示。 */
+  async function removeFolder(folder: string) {
+    const result = await request('library:removeFolder', { name: folder });
+    setFolderMenu(null);
+    if (!result.ok) {
+      setActionError(result.error?.detail ?? '删除失败');
+      return;
+    }
+    await refreshFolders();
+    if (libraryFolder === folder) navigate('library');
+    const failures = result.data.relinkFailures;
+    if (failures.length > 0) {
+      setActionError(`${failures.length} 个链接未重建：${failures.map((item) => `${item.dirName}（${item.agentName}）`).join('、')}`);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -224,15 +286,18 @@ export function Sidebar({ active, activeSessionId, libraryFolder }: { active: Ro
     return () => window.clearTimeout(timer);
   }, [actionError]);
 
-  // 菜单打开期间 Esc 关闭
+  // 菜单/内联输入打开期间 Esc 关闭
   useEffect(() => {
-    if (menu == null) return;
+    if (menu == null && folderMenu == null && folderEdit == null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenu(null);
+      if (event.key !== 'Escape') return;
+      setMenu(null);
+      setFolderMenu(null);
+      setFolderEdit(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menu]);
+  }, [menu, folderMenu, folderEdit]);
 
   const openMenu = useCallback((sessionId: string, anchor: HTMLElement) => {
     // 用整行的位置定位：菜单按钮在 hover 之前是隐藏的，自身 rect 不可靠
@@ -266,7 +331,14 @@ export function Sidebar({ active, activeSessionId, libraryFolder }: { active: Ro
       <nav className={s.nav} aria-label="主导航">
         {PRIMARY.map((def) => def.id === 'library' ? (
           <div key={def.id}>
-            <div className={s.libraryNavRow}>
+            <div
+              className={s.libraryNavRow}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setLibraryExpanded(true);
+                setFolderMenu({ folder: null, ...contextMenuPosition(event) });
+              }}
+            >
               <button
                 type="button"
                 className={s.libraryToggle}
@@ -282,18 +354,64 @@ export function Sidebar({ active, activeSessionId, libraryFolder }: { active: Ro
             {libraryExpanded ? (
               <div className={s.libraryFolders} aria-label="中心库文件夹" data-testid="library-folders">
                 {libraryFolders.map((folder) => (
-                  <button
-                    key={folder}
-                    type="button"
-                    className={`${s.folderItem} ${active === 'library' && libraryFolder === folder ? s.itemActive : ''}`}
-                    aria-current={active === 'library' && libraryFolder === folder ? 'page' : undefined}
-                    title={folder}
-                    onClick={() => navigate('library', { folder })}
-                  >
-                    <FolderIcon size={16} />
-                    <span className={s.label}>{folder}</span>
-                  </button>
+                  folderEdit?.mode === 'rename' && folderEdit.from === folder ? (
+                    <div key={folder} className={s.folderEditing}>
+                      <FolderIcon size={16} />
+                      <input
+                        className={s.folderInput}
+                        value={folderEdit.value}
+                        autoFocus
+                        onChange={(event) => setFolderEdit({ ...folderEdit, value: event.target.value })}
+                        onBlur={() => void submitFolderEdit()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        aria-label={`重命名文件夹 ${folder}`}
+                        data-testid="library-folder-input"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      key={folder}
+                      type="button"
+                      className={`${s.folderItem} ${active === 'library' && libraryFolder === folder ? s.itemActive : ''}`}
+                      aria-current={active === 'library' && libraryFolder === folder ? 'page' : undefined}
+                      title={folder}
+                      onClick={() => navigate('library', { folder })}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setFolderMenu({ folder, ...contextMenuPosition(event) });
+                      }}
+                    >
+                      <FolderIcon size={16} />
+                      <span className={s.label}>{folder}</span>
+                    </button>
+                  )
                 ))}
+                {folderEdit?.mode === 'create' ? (
+                  <div className={s.folderEditing}>
+                    <FolderIcon size={16} />
+                    <input
+                      className={s.folderInput}
+                      value={folderEdit.value}
+                      autoFocus
+                      placeholder="新建文件夹名"
+                      onChange={(event) => setFolderEdit({ ...folderEdit, value: event.target.value })}
+                      onBlur={() => void submitFolderEdit()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                      }}
+                      aria-label="新建文件夹名称"
+                      data-testid="library-folder-input"
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -333,6 +451,69 @@ export function Sidebar({ active, activeSessionId, libraryFolder }: { active: Ro
       <div className={s.footer}>
         <NavItem def={SETTINGS} active={active === 'settings'} />
       </div>
+
+      {folderMenu ? (
+        <>
+          <div className={s.menuBackdrop} role="presentation" onMouseDown={() => setFolderMenu(null)} />
+          <div
+            className={s.menu}
+            style={{ top: folderMenu.top, left: folderMenu.left }}
+            role="menu"
+            data-testid="library-folder-menu"
+          >
+            {folderMenu.folder == null ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={s.menuItem}
+                data-testid="library-folder-create"
+                onClick={() => {
+                  setFolderMenu(null);
+                  setLibraryExpanded(true);
+                  setFolderEdit({ mode: 'create', from: '', value: '' });
+                }}
+              >
+                新建文件夹
+              </button>
+            ) : folderMenu.confirmRemove ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={s.menuItem}
+                data-testid="library-folder-remove-confirm"
+                onClick={() => void removeFolder(folderMenu.folder ?? '')}
+              >
+                确认删除
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={s.menuItem}
+                  data-testid="library-folder-rename"
+                  onClick={() => {
+                    const folder = folderMenu.folder ?? '';
+                    setFolderMenu(null);
+                    setFolderEdit({ mode: 'rename', from: folder, value: folder });
+                  }}
+                >
+                  重命名
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={s.menuItem}
+                  data-testid="library-folder-remove"
+                  onClick={() => setFolderMenu((prev) => (prev ? { ...prev, confirmRemove: true } : prev))}
+                >
+                  删除
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
 
       {menu ? (
         <>

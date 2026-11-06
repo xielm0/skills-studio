@@ -26,7 +26,7 @@ import type { WriteLock } from '../infra/write-lock';
 import { hashAndSizeSkillDir } from './content-hash';
 import { buildFileTree } from './file-tree';
 import { isSkillDir } from './frontmatter';
-import { sameOrigin } from './path-guard';
+import { sameOrigin, sanitizeName } from './path-guard';
 import { generateSkillId } from './skill-id';
 import { scanSkillsDir } from './scanner';
 import type {
@@ -38,6 +38,28 @@ import type {
   SkillMetadataFile,
   SkillSummary,
 } from './types';
+import { MAX_GROUP_LENGTH } from './types';
+
+/** 库内一层文件夹（`skills/<组>/`）操作失败：单层目录名非法、不存在或重名。 */
+export class FolderError extends Error {
+  constructor(
+    readonly code: string,
+    readonly detail: string,
+  ) {
+    super(`${code}: ${detail}`);
+    this.name = 'FolderError';
+  }
+}
+
+/**
+ * 文件夹改动前技能所在的库内位置：目录移动后调用方据 previousPath 精确识别
+ * 「指向旧位置的 Agent 链接」并重建，避免误删用户自己放的链接。
+ */
+export interface MovedSkill {
+  skillId: string;
+  dirName: string;
+  previousPath: string;
+}
 
 export interface SkillLibraryServiceOptions {
   /** 库根目录（含 skills/ 与 library.json） */
@@ -134,6 +156,150 @@ export class SkillLibraryService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * 新建一层文件夹（`skills/<name>/`）：只建目录，不登记任何元数据。
+   * 侧边栏文件夹列表按磁盘实时枚举（listFolders），建完即可见（空目录也算）。
+   */
+  createFolder(rawName: string): string {
+    const name = this.requireFolderName(rawName);
+    const dest = path.join(this.skillsDir, name);
+    if (fs.existsSync(dest)) throw new FolderError('BAD_REQUEST', `已存在同名目录：${name}`);
+    fs.mkdirSync(dest);
+    this.logger?.info('library:folder-created', { name });
+    return name;
+  }
+
+  /**
+   * 重命名一层文件夹：目录改名后由 rescan 对账把技能 relPath 更新到新前缀。
+   * 返回移动前的技能位置，调用方据此重建 Agent 侧链接（链接指向库内绝对路径）。
+   */
+  async renameFolder(rawFrom: string, rawTo: string): Promise<MovedSkill[]> {
+    const from = this.requireFolderName(rawFrom);
+    const to = this.requireFolderName(rawTo);
+    if (from === to) return [];
+    this.requireFolderExists(from);
+    const source = path.join(this.skillsDir, from);
+    const target = path.join(this.skillsDir, to);
+    if (fs.existsSync(target)) throw new FolderError('BAD_REQUEST', `已存在同名目录：${to}`);
+    const moved = this.collectFolderSkills(from);
+    const run = async (): Promise<MovedSkill[]> => {
+      fs.renameSync(source, target);
+      await this.rescan();
+      return moved;
+    };
+    const result = this.lock != null ? this.lock.runExclusive('folder-rename', run) : run();
+    await result;
+    this.logger?.info('library:folder-renamed', { from, to, skills: moved.length });
+    return moved;
+  }
+
+  /**
+   * 删除一层文件夹：里面的技能逐个移到库根（变成未分组），最后移除空目录。
+   * 根下已有同名目录时整体拒绝，不做半途移动；非技能残留内容不静默删除，目录保留。
+   */
+  async removeFolder(rawName: string): Promise<MovedSkill[]> {
+    const name = this.requireFolderName(rawName);
+    this.requireFolderExists(name);
+    const source = path.join(this.skillsDir, name);
+    const moved = this.collectFolderSkills(name);
+    const conflicts = moved.filter((item) => fs.existsSync(path.join(this.skillsDir, item.dirName)));
+    if (conflicts.length > 0) {
+      throw new FolderError('BAD_REQUEST', `库根已有同名技能目录，未移动：${conflicts.map((item) => item.dirName).join('、')}`);
+    }
+    const run = async (): Promise<MovedSkill[]> => {
+      for (const item of moved) {
+        fs.renameSync(path.join(source, item.dirName), path.join(this.skillsDir, item.dirName));
+      }
+      try {
+        fs.rmdirSync(source);
+      } catch {
+        /* 目录里还有非技能内容：保留原目录，不替用户删除 */
+      }
+      await this.rescan();
+      return moved;
+    };
+    const result = this.lock != null ? this.lock.runExclusive('folder-remove', run) : run();
+    await result;
+    this.logger?.info('library:folder-removed', { name, skills: moved.length });
+    return moved;
+  }
+
+  /**
+   * 把单个技能移动到某个文件夹（folder 为空串 = 移回库根）。
+   * 与文件夹改名/删除同一条链路：目录移动后由 rescan 对账 relPath，
+   * 返回旧位置供调用方重建 Agent 链接。
+   */
+  async moveSkill(skillId: string, rawFolder: string): Promise<MovedSkill[]> {
+    const skill = this.listSkills().find((item) => item.skillId === skillId);
+    if (!skill) throw new FolderError('BAD_REQUEST', `技能不存在：${skillId}`);
+    const folder = typeof rawFolder === 'string' ? rawFolder.trim() : '';
+    if (folder.length > 0) {
+      this.requireFolderName(folder);
+      this.requireFolderExists(folder);
+    }
+    const targetRelPath = folder.length > 0 ? `${folder}/${skill.dirName}` : skill.dirName;
+    if (targetRelPath === skill.relPath) return [];
+    const source = skillsDirJoin(this.skillsDir, skill.relPath);
+    const dest = skillsDirJoin(this.skillsDir, targetRelPath);
+    if (fs.existsSync(dest)) {
+      throw new FolderError('BAD_REQUEST', `目标位置已存在同名目录：${targetRelPath}`);
+    }
+    const moved: MovedSkill[] = [{ skillId, dirName: skill.dirName, previousPath: source }];
+    const run = async (): Promise<MovedSkill[]> => {
+      fs.renameSync(source, dest);
+      await this.rescan();
+      return moved;
+    };
+    const result = this.lock != null ? this.lock.runExclusive('skill-move', run) : run();
+    await result;
+    this.logger?.info('library:skill-moved', { skillId, from: skill.relPath, to: targetRelPath });
+    return moved;
+  }
+
+  /** 文件夹名单层校验：清洗后必须原样等于输入，避免静默改名后再重名。 */
+  private requireFolderName(raw: string): string {
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (name.length === 0) throw new FolderError('BAD_REQUEST', '文件夹名不能为空');
+    if (name.length > MAX_GROUP_LENGTH) throw new FolderError('BAD_REQUEST', `文件夹名过长（最多 ${MAX_GROUP_LENGTH} 字符）`);
+    if (name.includes('/') || name.includes('\\')) throw new FolderError('BAD_REQUEST', '文件夹名不能包含路径分隔符');
+    if (name.startsWith('.')) throw new FolderError('BAD_REQUEST', '文件夹名不能以点开头');
+    if (name === SKILL_META_DIRNAME) throw new FolderError('BAD_REQUEST', `「${SKILL_META_DIRNAME}」是保留目录名`);
+    if (sanitizeName(name) !== name) throw new FolderError('BAD_REQUEST', '文件夹名包含不可用的字符');
+    return name;
+  }
+
+  /** 目标文件夹必须已存在且确实是目录。 */
+  private requireFolderExists(name: string): void {
+    const dir = path.join(this.skillsDir, name);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(dir);
+    } catch {
+      throw new FolderError('BAD_REQUEST', `文件夹不存在：${name}`);
+    }
+    if (!stat.isDirectory()) throw new FolderError('BAD_REQUEST', `不是文件夹：${name}`);
+  }
+
+  /** 列出文件夹里的技能子目录（含 SKILL.md）；非技能内容忽略，不留半成品记录。 */
+  private collectFolderSkills(folder: string): MovedSkill[] {
+    const dir = path.join(this.skillsDir, folder);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: MovedSkill[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const child = path.join(dir, entry.name);
+      if (!isSkillDir(child)) continue;
+      const meta = readSkillMeta(this.skillsDir, entry.name);
+      out.push({ skillId: meta?.skillId ?? '', dirName: entry.name, previousPath: child });
+    }
+    return out;
   }
 
   /**

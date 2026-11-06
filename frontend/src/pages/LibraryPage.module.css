@@ -353,6 +353,69 @@
   color: var(--c-text);
 }
 
+/* 「移动到文件夹」子菜单：紧贴菜单项向左展开（桌面软件惯例，不用居中弹窗） */
+.submenuWrap {
+  position: relative;
+}
+
+.submenuTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.submenuArrow {
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.submenu {
+  position: absolute;
+  top: -4px;
+  right: calc(100% + 4px);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.submenu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+
+.submenu button:hover:not(:disabled) {
+  background: var(--c-bg-hover);
+}
+
+.submenu button:disabled {
+  color: var(--c-text-secondary);
+  cursor: default;
+}
+
 .menu {
   position: absolute;
   top: calc(100% - 2px);

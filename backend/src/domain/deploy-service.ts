@@ -29,7 +29,7 @@ import { AgentConfigService, type AgentInfo } from './agents';
 import { hashSkillDir, isIgnoredDirName, isIgnoredFileName } from './content-hash';
 import { compareSkillDirs } from './skill-dir-diff';
 import { isSkillDir, readSkillMd } from './frontmatter';
-import { SkillLibraryService } from './library';
+import { SkillLibraryService, type MovedSkill } from './library';
 import { groupOfSkillRelPath, isPathSafe, sanitizeName, validateNewDirName, validateSkillRelPath } from './path-guard';
 import { libraryDestDirOf } from '../infra/fs-meta';
 import { scanLocalSkills, type DiscoveredToolSkill } from './tool-scanner';
@@ -527,6 +527,67 @@ export class SkillDeployService {
 
   async undeployFromAgents(skillId: string, agentIds: string[]): Promise<UndeployItemResult[]> {
     return this.lock.runExclusive('undeploy', () => agentIds.map((id) => this.undeployUnlocked(skillId, id)));
+  }
+
+  /**
+   * 库内目录移动（文件夹改名 / 删除）后重建 Agent 侧链接。
+   *
+   * 链接里存的是库内绝对路径，目录一移就悬空，所以必须跟着改：
+   *  - 只删「确实指向该技能旧位置」的链接（previousPath），指向别处的链接零覆盖零删除；
+   *  - 按原落点重建（resolveAgentTarget 读落点记忆，不动记忆本身），落点层级不变；
+   *  - 目标已被替换成实体目录/文件时跳过并如实报告，交用户处理。
+   * 意图取元数据 sync.agents：链接断了之后 deployedAgents（意图 ∩ 实测）会变空，不能用它。
+   */
+  async relinkMoved(items: readonly MovedSkill[]): Promise<DeployItemResult[]> {
+    return this.lock.runExclusive('deploy', () => {
+      const results: DeployItemResult[] = [];
+      for (const item of items) {
+        const skill = this.findSkill(item.skillId);
+        if (!skill) continue;
+        const agentIds = readSkillMeta(this.library.skillsDir, item.dirName)?.sync?.agents ?? [];
+        for (const agentId of agentIds) {
+          const agent = this.agents.get(agentId);
+          if (!agent) continue;
+          const target = this.resolveAgentTarget(agent, item.dirName);
+          const insp = inspectTarget(target);
+          const isOldLink = insp.kind === 'link' && insp.resolvedTarget != null
+            && samePath(insp.resolvedTarget, item.previousPath);
+          if (insp.kind !== 'missing' && !isOldLink) {
+            results.push({
+              skillId: item.skillId,
+              agentId,
+              agentName: agent.name,
+              dirName: item.dirName,
+              targetPath: target,
+              status: 'skipped',
+              code: 'TARGET_REPLACED',
+              reason: '目标已被替换（实体目录或指向别处的链接），未自动重建',
+            });
+            continue;
+          }
+          if (isOldLink) {
+            try {
+              removeDirLink(target);
+            } catch (err) {
+              const le = err as LinkError;
+              results.push({
+                skillId: item.skillId,
+                agentId,
+                agentName: agent.name,
+                dirName: item.dirName,
+                targetPath: target,
+                status: 'failed',
+                code: le.code ?? 'LINK_REMOVE_FAILED',
+                reason: le.detail ?? (err as Error).message,
+              });
+              continue;
+            }
+          }
+          results.push(this.deployOneUnlocked(item.skillId, agentId));
+        }
+      }
+      return results;
+    });
   }
 
   private undeployUnlocked(skillId: string, agentId: string): UndeployItemResult {

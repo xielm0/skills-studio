@@ -316,6 +316,8 @@ export class AgentSkillsService {
     return {
       skillId: null,
       dirName,
+      // 未入库技能不在库内，按平铺语义占位（行菜单「移动到文件夹」不对它开放）
+      relPath: dirName,
       name,
       description: md.meta.description ?? '',
       missingName: frontName.length === 0,

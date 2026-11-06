@@ -126,6 +126,35 @@
   color: var(--c-text);
 }
 
+/* 内联输入（新建 / 重命名文件夹）：与 folderItem 同尺寸，只换掉文字部分 */
+.folderEditing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 36px;
+  color: var(--c-text-secondary);
+}
+
+.folderInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.folderInput:focus {
+  border-color: var(--c-accent);
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -312,7 +341,10 @@
 .menu {
   position: fixed;
   z-index: 41;
-  min-width: 144px;
+  /* 宽度由内容决定：菜单项少时（如「新建文件夹」）不留大片空白，
+     项多时仍受 max-width 约束 */
+  width: max-content;
+  max-width: 200px;
   padding: 4px;
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
@@ -326,6 +358,7 @@
   width: 100%;
   min-height: 30px;
   padding: 4px 8px;
+  white-space: nowrap;
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;

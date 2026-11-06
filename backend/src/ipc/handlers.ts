@@ -248,6 +248,28 @@ function looksBinary(buffer: Buffer): boolean {
   return suspicious / limit > 0.1;
 }
 
+/**
+ * 文件夹改动结果：把重建链接里失败/跳过的项收敛成界面可直接展示的文案。
+ * movedSkills 是本批次被移动的技能数（0 = 空文件夹）。
+ */
+function folderMutationResult(
+  name: string,
+  movedSkills: number,
+  relink: ReadonlyArray<{ dirName: string; agentId: string; agentName?: string; status: string; reason?: string }>,
+): { name: string; movedSkills: number; relinkFailures: Array<{ dirName: string; agentName: string; reason: string }> } {
+  return {
+    name,
+    movedSkills,
+    relinkFailures: relink
+      .filter((item) => item.status === 'failed' || item.status === 'skipped')
+      .map((item) => ({
+        dirName: item.dirName,
+        agentName: item.agentName ?? item.agentId,
+        reason: item.reason ?? '未重建',
+      })),
+  };
+}
+
 export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
   const { context } = deps;
 
@@ -777,6 +799,30 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
     },
 
     'library:folders': async () => ({ folders: await context.library.listFolders() }),
+    'library:createFolder': (payload: { name?: unknown }) => ({
+      name: context.library.createFolder(typeof payload?.name === 'string' ? payload.name : ''),
+    }),
+    'library:renameFolder': async (payload: { from?: unknown; to?: unknown }) => {
+      const from = typeof payload?.from === 'string' ? payload.from : '';
+      const to = typeof payload?.to === 'string' ? payload.to : '';
+      const moved = await context.library.renameFolder(from, to);
+      // 库内路径变了，指向旧位置的 Agent 链接必须跟着重建（按原落点，不动落点记忆）
+      const relink = moved.length > 0 ? await context.deploy.relinkMoved(moved) : [];
+      return folderMutationResult(to, moved.length, relink);
+    },
+    'library:removeFolder': async (payload: { name?: unknown }) => {
+      const name = typeof payload?.name === 'string' ? payload.name : '';
+      const moved = await context.library.removeFolder(name);
+      const relink = moved.length > 0 ? await context.deploy.relinkMoved(moved) : [];
+      return folderMutationResult('', moved.length, relink);
+    },
+    'library:moveSkill': async (payload: { skillId?: unknown; folder?: unknown }) => {
+      const skillId = typeof payload?.skillId === 'string' ? payload.skillId : '';
+      const folder = typeof payload?.folder === 'string' ? payload.folder : '';
+      const moved = await context.library.moveSkill(skillId, folder);
+      const relink = moved.length > 0 ? await context.deploy.relinkMoved(moved) : [];
+      return folderMutationResult(folder, moved.length, relink);
+    },
 
     'library:facets': (payload) => {
       const folder = (payload as { folder?: unknown } | undefined)?.folder;
