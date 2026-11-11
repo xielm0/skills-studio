@@ -99,6 +99,66 @@ export function hashAndSizeSkillDir(dir: string): { hash: string; sizeBytes: num
 }
 
 /**
+ * hashAndSizeSkillDir 的异步版（结果与同步版逐字节一致：同一忽略清单、同一排序、同一哈希输入）。
+ *
+ * 重扫（doRescan）在 Electron 主进程运行，同步版逐文件 readFileSync 会把事件循环
+ * 堵满整次扫描（数千文件的库 = 数秒「未响应」）。异步版：
+ *  - 文件读取走 fs.promises，池并发 FILE_READ_CONCURRENCY 路；
+ *  - 每 FLUSH_EVERY_N_FILES 个文件让出事件循环（setImmediate），单次阻塞毫秒级；
+ *  - sha256 纯 CPU 段仍同步，但被切片在让路点之间，不再冻结窗口消息泵。
+ */
+export async function hashAndSizeSkillDirAsync(dir: string): Promise<{ hash: string; sizeBytes: number }> {
+  const hash = crypto.createHash('sha256');
+  let sizeBytes = 0;
+  // 文件清单先同步收集（readdir 便宜），读取阶段再异步并发——保证哈希输入顺序与同步版一致
+  const files: Array<{ relPath: string; full: string }> = [];
+  const collect = (cur: string, rel: string): void => {
+    const entries = fs.readdirSync(cur, { withFileTypes: true });
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (IGNORED_DIRS.has(entry.name)) continue;
+      if (IGNORED_FILES.has(entry.name)) continue;
+      if (IGNORED_EXTS.includes(path.extname(entry.name).toLowerCase())) continue;
+      const relPath = rel === '.' ? entry.name : `${rel}/${entry.name}`;
+      const full = path.join(cur, entry.name);
+      if (entry.isDirectory()) collect(full, relPath);
+      else if (entry.isFile()) files.push({ relPath, full });
+      // 符号链接不参与哈希（与同步版一致：部署是链接形态，跟内容变更无关）
+    }
+  };
+  collect(dir, '.');
+
+  // 并行读取、按清单顺序喂哈希：worker 完成顺序不定，先落结果槽，
+  // 最后按序 update——保证哈希输入序列与同步版逐字节一致
+  const next = { value: 0 };
+  const bufs = new Array<Buffer>(files.length);
+  let processed = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next.value++;
+      if (i >= files.length) return;
+      bufs[i] = await fs.promises.readFile(files[i].full);
+      processed++;
+      if (processed % FLUSH_EVERY_N_FILES === 0) await new Promise<void>((r) => setImmediate(r));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(FILE_READ_CONCURRENCY, files.length) }, worker));
+  for (let i = 0; i < files.length; i++) {
+    hash.update(files[i].relPath);
+    hash.update('\0');
+    hash.update(bufs[i]);
+    hash.update('\0');
+    sizeBytes += bufs[i].length;
+  }
+  return { hash: hash.digest('hex'), sizeBytes };
+}
+
+/** 异步哈希的读取并发路数（小文件库的合理值，过高反而放大 IO 竞争） */
+const FILE_READ_CONCURRENCY = 8;
+/** 每处理多少个文件让出一次事件循环 */
+const FLUSH_EVERY_N_FILES = 64;
+
+/**
  * T02：目录内每个文件的内容哈希表（relPath（'/' 分隔）→ sha256 hex），
  * 忽略清单与 hashSkillDir 一致，供逐文件差异比较使用。
  * fold=true 时按 LF 归一口径（只折叠 CRLF，文本文件），差异弹窗用它判断「这个文件算不算改过」。

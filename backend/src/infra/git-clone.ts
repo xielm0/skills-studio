@@ -127,3 +127,21 @@ export function gitRevision(repoDir: string): string | undefined {
   const revision = result.status === 0 ? result.stdout.trim() : '';
   return /^[0-9a-f]{40,64}$/i.test(revision) ? revision : undefined;
 }
+
+/** gitRevision 的异步版（GUI 主进程专用：rev-parse 不在主进程同步等待）。 */
+export function gitRevisionAsync(repoDir: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['-C', repoDir, 'rev-parse', 'HEAD'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { out += chunk; });
+    child.on('error', () => resolve(undefined));
+    child.on('close', (code) => {
+      const revision = code === 0 ? out.trim() : '';
+      resolve(/^[0-9a-f]{40,64}$/i.test(revision) ? revision : undefined);
+    });
+  });
+}

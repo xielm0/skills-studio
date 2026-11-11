@@ -23,7 +23,7 @@ import {
   readTextFileInDir,
   writeTextFileAtomicInDir,
 } from './catalog';
-import { hashAndSizeSkillDir, isIgnoredDirName } from './content-hash';
+import { hashAndSizeSkillDir, hashAndSizeSkillDirAsync, isIgnoredDirName } from './content-hash';
 import { buildFileTree } from './file-tree';
 import { isSkillDir, readSkillMd } from './frontmatter';
 import type { SkillLibraryService } from './library';
@@ -93,7 +93,7 @@ export class AgentSkillsService {
   }
 
   /** 列表（实时扫描，不加缓存）。目录不存在时 exists=false，不抛错。 */
-  list(agentId: string): AgentsSkillListResult {
+  async list(agentId: string): Promise<AgentsSkillListResult> {
     const agent = this.agents.get(agentId);
     const base = {
       agentId,
@@ -115,7 +115,9 @@ export class AgentSkillsService {
     const libSkills = this.library.listSkills();
     const items: AgentSkillRow[] = [];
     const places = new Map<string, string[]>();
-    this.collect(agent, agent.skillsDir, '', 0, libSkills, items, places);
+    // 异步收集：toRow 的逐技能内容哈希走异步版（数千文件的 Agent 目录上，
+    // 同步版会把主进程事件循环堵满整次扫描 → 切 Agents 页「未响应」）
+    await this.collect(agent, agent.skillsDir, '', 0, libSkills, items, places);
     // 排序：先按 group（相对路径首段，扁平条目为空）聚拢，组内按 Skill 名称升序，目录名兜底保证稳定
     items.sort(
       (a, b) =>
@@ -145,7 +147,7 @@ export class AgentSkillsService {
    * 递归收集该 Agent 目录下的技能条目（与 tool-scanner 同一口径：层数 ≤ MAX_SKILL_DEPTH）。
    * 命中即停：目录本身是技能时不再看子目录；嵌套条目的 dirName 为相对路径（`group/a`）。
    */
-  private collect(
+  private async collect(
     agent: AgentInfo,
     root: string,
     rel: string,
@@ -153,7 +155,7 @@ export class AgentSkillsService {
     libSkills: ReturnType<SkillLibraryService['listSkills']>,
     out: AgentSkillRow[],
     places: Map<string, string[]>,
-  ): void {
+  ): Promise<void> {
     if (depth >= MAX_SKILL_DEPTH) return;
     let entries: fs.Dirent[];
     try {
@@ -177,7 +179,7 @@ export class AgentSkillsService {
 
       if (isSkillDir(info.root)) {
         try {
-          out.push(this.toRow(info, libSkills));
+          out.push(await this.toRow(info, libSkills));
         } catch (err) {
           this.logger?.error('agent-skills:row-failed', { entry, error: (err as Error).message });
         }
@@ -193,7 +195,7 @@ export class AgentSkillsService {
         continue;
       }
 
-      this.collect(agent, path.join(root, dirent.name), entry, depth + 1, libSkills, out, places);
+      await this.collect(agent, path.join(root, dirent.name), entry, depth + 1, libSkills, out, places);
     }
   }
 
@@ -464,14 +466,14 @@ export class AgentSkillsService {
     return { entry: dirName, root: full, kind: 'real-dir', isManagedLink: false, libraryDirName: null, skillId: null, missing: true };
   }
 
-  private toRow(info: EntryInfo, libSkills: ReturnType<SkillLibraryService['listSkills']>): AgentSkillRow {
+  private async toRow(info: EntryInfo, libSkills: ReturnType<SkillLibraryService['listSkills']>): Promise<AgentSkillRow> {
     const md = readSkillMd(info.root);
     if (info.isManagedLink) {
       const summary = libSkills.find((s) => s.dirName === info.libraryDirName);
       const meta = summary ? null : readSkillMeta(this.library.skillsDir, info.libraryDirName ?? '');
       let sizeBytes: number | undefined;
       try {
-        if (!info.missing) sizeBytes = hashAndSizeSkillDir(info.root).sizeBytes;
+        if (!info.missing) sizeBytes = (await hashAndSizeSkillDirAsync(info.root)).sizeBytes;
       } catch {
         sizeBytes = undefined;
       }
@@ -491,7 +493,7 @@ export class AgentSkillsService {
     let hash: string | null = null;
     let sizeBytes: number | undefined;
     try {
-      const hashed = hashAndSizeSkillDir(info.root);
+      const hashed = await hashAndSizeSkillDirAsync(info.root);
       hash = hashed.hash;
       sizeBytes = hashed.sizeBytes;
     } catch {
@@ -503,17 +505,18 @@ export class AgentSkillsService {
     let sameContent = false;
     if (existing != null && hash != null) {
       const existingMeta = readSkillMeta(this.library.skillsDir, existing.dirName);
-      const existingHash =
-        existingMeta?.contentHash ??
-        (() => {
-          try {
-            return hashAndSizeSkillDir(
+      let existingHash: string | null = existingMeta?.contentHash ?? null;
+      if (existingHash == null) {
+        try {
+          existingHash = (
+            await hashAndSizeSkillDirAsync(
               skillsDirJoin(this.library.skillsDir, existingMeta?.relPath ?? existing.dirName),
-            ).hash;
-          } catch {
-            return null;
-          }
-        })();
+            )
+          ).hash;
+        } catch {
+          existingHash = null;
+        }
+      }
       sameContent = existingHash != null && existingHash === hash;
     }
     return {

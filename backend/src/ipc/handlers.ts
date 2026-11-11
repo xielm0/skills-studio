@@ -650,9 +650,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     'firstRun:complete': () => context.firstRun.complete(),
 
-    'library:getOverview': () => context.overview().overview(),
+    // 概览/近期动态走批量异步探针：首屏 IPC 不再在主进程逐技能同步 stat
+    'library:getOverview': async () => context.overview().overview(),
 
-    'library:getRecentActivity': () => context.overview().recentActivity(),
+    'library:getRecentActivity': async () => context.overview().recentActivity(),
 
     'library:changeDirectory': async (payload: LibraryChangeDirectoryRequest) => {
       const targetDir = requireString(payload, 'targetDir');
@@ -708,7 +709,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     /* ────────────────────────── T13：Agents 页 ────────────────────────── */
 
-    'agents:listSkills': (payload: AgentsSkillsRequest): AgentsSkillListResult =>
+    // Agents 页列表：逐技能内容哈希走异步版，切页不再冻结主进程（与中心库列表同口径）
+    'agents:listSkills': async (payload: AgentsSkillsRequest): Promise<AgentsSkillListResult> =>
       context.agentSkills.list(requireString(payload, 'agentId')),
 
     'agents:resolveConflict': async (payload: AgentsResolveConflictRequest): Promise<LibrarySyncItem> => {
@@ -782,7 +784,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     /* ────────────────────────── T11：Skills 中心库 ────────────────────────── */
 
-    'library:list': (payload: LibraryListRequest): LibraryListResult => {
+    'library:list': async (payload: LibraryListRequest): Promise<LibraryListResult> => {
       const folder = (payload as { folder?: unknown } | undefined)?.folder;
       if (folder !== undefined && typeof folder !== 'string') {
         throw new AgentError('BAD_REQUEST', '参数 folder 必须是字符串');
@@ -795,7 +797,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
         origin: optionalString(payload, 'origin'),
         agentId: optionalString(payload, 'agentId'),
       };
-      return context.catalog.list(filter);
+      return await context.catalog.list(filter);
     },
 
     'library:folders': async () => ({ folders: await context.library.listFolders() }),
@@ -824,12 +826,12 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
       return folderMutationResult(folder, moved.length, relink);
     },
 
-    'library:facets': (payload) => {
+    'library:facets': async (payload) => {
       const folder = (payload as { folder?: unknown } | undefined)?.folder;
       if (folder !== undefined && typeof folder !== 'string') {
         throw new AgentError('BAD_REQUEST', '参数 folder 必须是字符串');
       }
-      return context.catalog.facets(folder);
+      return await context.catalog.facets(folder);
     },
 
     'library:checkUpdates': async () => {
@@ -1383,7 +1385,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
       context.install.marketResolveConflict({ key: requireString(payload, 'key'), choice: payload.choice,
         sourceHash: requireString(payload, 'sourceHash'), targetHash: requireString(payload, 'targetHash') }),
 
-    'install:gitParse': (payload: InstallGitParseRequest): InstallDiscoveryResult => {
+    'install:gitParse': async (payload: InstallGitParseRequest): Promise<InstallDiscoveryResult> => {
       const url = requireString(payload, 'url');
       return context.install.gitParse(url);
     },
@@ -1443,7 +1445,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     /* ────────────────────────── T14：备份与同步 ────────────────────────── */
 
-    'sync:status': (): SyncStatusResult => context.sync.status(),
+    'sync:status': async (): Promise<SyncStatusResult> => context.sync.status(),
 
     'sync:connect': (payload: SyncConnectRequest): Promise<SyncStatusResult> =>
       context.sync.connect(requireString(payload, 'url')),
@@ -1481,9 +1483,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
     'sync:push': (): Promise<SyncPushResult> => context.sync.push(),
 
-    'sync:history': (): SyncHistoryResult => context.sync.history(),
+    'sync:history': async (): Promise<SyncHistoryResult> => context.sync.history(),
 
-    'sync:versionDetail': (payload: SyncVersionDetailRequest): SyncVersionDetailResult =>
+    'sync:versionDetail': async (payload: SyncVersionDetailRequest): Promise<SyncVersionDetailResult> =>
       context.sync.versionDetail(requireSha(payload, 'sha')),
 
     'sync:restore': (payload: SyncRestoreRequest): Promise<SyncRestoreResult> => {
@@ -1608,7 +1610,8 @@ function cliSetupInstalled(context: AppContext): boolean {
 }
 
 function cliSetupLibraryRow(context: AppContext) {
-  return context.catalog
-    .list({ query: 'skills-studio' })
-    .items.find((row) => row.name === 'skills-studio' && row.missingName !== true);
+  // 只判断「在不在库」，不需要部署探针：直接查索引摘要（dirName 与 catalog 行的 name 同值）
+  return context.library
+    .listSkills()
+    .find((row) => row.dirName === 'skills-studio' && row.missingName !== true);
 }

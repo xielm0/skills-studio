@@ -481,7 +481,7 @@ async function runSkillsInstall(
       break;
     }
     case 'git': {
-      const found = session.sources.discoverFromGit(arg);
+      const found = await session.sources.discoverFromGit(arg);
       sessionDir = found.sessionDir;
       if (found.items.length === 0) throw new CliError('IMPORT_NO_ITEMS', `仓库中没有可导入的 Skill：${arg}`);
       const res = await session.sources.importSkills(found.items, { sessionDir });
@@ -671,7 +671,7 @@ function runAgentsAddCustom(session: CliSession, flags: ParsedArgs['flags']): Pr
 }
 
 async function runSyncStatus(session: CliSession): Promise<CommandResult> {
-  const status = session.backup.getStatus();
+  const status = await session.backup.getStatus();
   const conflicts = session.backup.listConflicts().map((c) => ({
     skillId: c.skillId,
     dirName: c.dirName,

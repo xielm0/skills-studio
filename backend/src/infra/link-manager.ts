@@ -107,6 +107,42 @@ export function inspectTarget(target: string): TargetInspection {
   return { path: target, exists: true, kind: 'other', linkTarget: null, resolvedTarget: null };
 }
 
+/**
+ * inspectTarget 的异步版（判定逻辑与同步版保持一致）：批量探针（列表部署状态）
+ * 用它把逐技能×逐 Agent 的 lstat/readlink 从主进程同步等待改为并行 IO，
+ * 避免 Windows 冷盘上几十次同步 stat 堵住事件循环（「未响应」的来源之一）。
+ */
+export async function inspectTargetAsync(target: string): Promise<TargetInspection> {
+  let st: fs.Stats;
+  try {
+    st = await fs.promises.lstat(target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { path: target, exists: false, kind: 'missing', linkTarget: null, resolvedTarget: null };
+    }
+    throw err;
+  }
+  if (st.isSymbolicLink()) {
+    let raw: string | null = null;
+    try {
+      raw = await fs.promises.readlink(target);
+    } catch {
+      raw = null;
+    }
+    return {
+      path: target,
+      exists: true,
+      kind: 'link',
+      linkTarget: raw,
+      resolvedTarget: raw == null ? null : resolveLinkPath(target, raw),
+    };
+  }
+  if (st.isDirectory()) return { path: target, exists: true, kind: 'dir', linkTarget: null, resolvedTarget: null };
+  if (st.isFile()) return { path: target, exists: true, kind: 'file', linkTarget: null, resolvedTarget: null };
+  return { path: target, exists: true, kind: 'other', linkTarget: null, resolvedTarget: null };
+}
+
 export interface CreateDirLinkResult {
   /** 实际使用的形态（日志/测试证据用） */
   linkType: LinkType;

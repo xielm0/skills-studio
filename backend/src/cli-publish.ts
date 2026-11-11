@@ -218,8 +218,38 @@ function collectDependencyClosure(appRoot: string, distDir: string): DependencyC
   };
 }
 
+/** 判定路径是否位于 asar 归档内（生产打包后 CLI 源 = <安装>/resources/app.asar/dist）。 */
+export function isInsideAsar(p: string): boolean {
+  // app.asar.unpacked 是真盘目录（段名不以 .asar 结尾），天然不命中
+  return p.split(path.sep).some((seg) => seg.endsWith('.asar'));
+}
+
+/**
+ * 从 asar 归档内逐文件复制目录到真盘。
+ * Electron 对归档内路径只保证读类 API（readFileSync/readdirSync/stat），
+ * cpSync/lstatSync 会报 ENOENT（打包后首启 cli:publish-failed 的根因）；
+ * 归档内没有符号链接（打包时已展开为实体文件），按普通目录递归即可。
+ */
+export function copyDirFromArchive(src: string, dst: string): void {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copyDirFromArchive(from, to);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    fs.writeFileSync(to, fs.readFileSync(from));
+  }
+}
+
 function copyDirFresh(src: string, dst: string): void {
   fs.rmSync(dst, { recursive: true, force: true });
+  if (isInsideAsar(src)) {
+    copyDirFromArchive(src, dst);
+    return;
+  }
   if (fs.lstatSync(src).isSymbolicLink()) {
     // file:../agents 在 npm 安装后是 junction；发布目录必须带实体文件，不能链接回源码。
     const source = fs.realpathSync(src);
@@ -343,7 +373,8 @@ export function publishCli(opts: PublishCliOptions = {}): PublishCliResult {
 
   // 2) package.json：版本回退与依赖声明（也便于排障时核对来源版本）
   const rootPkg = path.join(appRoot, 'package.json');
-  if (fs.existsSync(rootPkg)) fs.copyFileSync(rootPkg, path.join(targetDir, 'package.json'));
+  // package.json 可能在 asar 归档内（生产打包），copyFileSync 对归档源不可靠 → 读→写
+  if (fs.existsSync(rootPkg)) fs.writeFileSync(path.join(targetDir, 'package.json'), fs.readFileSync(rootPkg));
 
   // 3) 运行依赖闭包（CLI 产物静态 require 出发；同名同版本时跳过复制）
   const closure = collectDependencyClosure(appRoot, distDir);
@@ -448,7 +479,8 @@ function copyProgramFiles(distDir: string, targetDir: string, previousProgramFil
   for (const name of topLevel) {
     const from = path.join(distDir, name);
     const to = path.join(targetDir, name);
-    fs.copyFileSync(from, to);
+    // copyFileSync 对 asar 归档内源不可靠（同 cpSync），统一走读→写
+    fs.writeFileSync(to, fs.readFileSync(from));
   }
   for (const dir of PROGRAM_DIRS) {
     const from = path.join(distDir, dir);

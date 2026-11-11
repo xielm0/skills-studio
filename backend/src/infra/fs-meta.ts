@@ -166,6 +166,25 @@ export function readSkillMeta(skillsDir: string, dirName: string): ReadSkillMeta
   } catch {
     return null;
   }
+  return parseSkillMetaRaw(raw, dirName);
+}
+
+/**
+ * readSkillMeta 的异步版（解析与校验同源）：批量探针用它把元数据读取改为并行 IO，
+ * 避免首屏列表逐技能同步读文件堵住主进程。
+ */
+export async function readSkillMetaAsync(skillsDir: string, dirName: string): Promise<ReadSkillMeta | null> {
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(skillMetaPath(skillsDir, dirName), 'utf8');
+  } catch {
+    return null;
+  }
+  return parseSkillMetaRaw(raw, dirName);
+}
+
+/** 元数据原始文本 → 校验并补齐派生字段；损坏/不合法返回 null（同步/异步版共用）。 */
+function parseSkillMetaRaw(raw: string, dirName: string): ReadSkillMeta | null {
   try {
     const m = JSON.parse(raw) as SkillMetadataFile;
     if (typeof m.skillId !== 'string' || !isSkillId(m.skillId)) return null;

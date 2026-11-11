@@ -61,14 +61,14 @@ export class FirstRunService {
   }
 
   /** 按适配器清单扫描本机（未登记的 Agent 目录不访问；与「扫描本机」同一链路）。 */
-  scan(): FirstRunScanResult {
+  async scan(): Promise<FirstRunScanResult> {
     const libraryDirNames = new Set(this.library.listSkills().map((s) => s.dirName));
     const items: FirstRunScanItem[] = [];
     const agents: FirstRunScanAgent[] = [];
     this.scanned = new Map();
 
     const targets = this.agents.list().map((a) => ({ key: a.id, label: a.name, dir: a.skillsDir }));
-    const plan = scanLocalSkills({ targets, centralSkillsDir: this.library.skillsDir });
+    const plan = await scanLocalSkills({ targets, centralSkillsDir: this.library.skillsDir });
 
     const counts = new Map<string, number>();
     for (const agent of this.agents.list()) {

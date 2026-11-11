@@ -15,7 +15,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { hashAndSizeSkillDir, isIgnoredDirName, skillContentMtime } from './content-hash';
+import { hashAndSizeSkillDirAsync, isIgnoredDirName, skillContentMtime } from './content-hash';
 import { isSkillDir } from './frontmatter';
 import { MAX_SKILL_DEPTH, groupOfSkillRelPath } from './path-guard';
 import { describeSkillDir as describeForDiscovery } from './sources/discovery';
@@ -84,7 +84,7 @@ export interface ToolScanOptions {
 }
 
 /** 遍历给定目标扫描本机；未传入的目录不访问。 */
-export function scanLocalSkills(opts: ToolScanOptions): ToolScanPlan {
+export async function scanLocalSkills(opts: ToolScanOptions): Promise<ToolScanPlan> {
   const managed = new Set((opts.managedPaths ?? []).map(canonicalLossy));
   const discovered: DiscoveredToolSkill[] = [];
   let toolsScanned = 0;
@@ -92,7 +92,7 @@ export function scanLocalSkills(opts: ToolScanOptions): ToolScanPlan {
   for (const target of opts.targets) {
     if (!isDirectoryFollowingLinks(target.dir)) continue; // 目录不存在 / 断链：跳过该 Agent
     toolsScanned += 1;
-    scanDir(target, target.dir, '', 0, opts, managed, discovered);
+    await scanDir(target, target.dir, '', 0, opts, managed, discovered);
   }
 
   return { toolsScanned, skillsFound: discovered.length, discovered };
@@ -125,7 +125,7 @@ export function groupDiscovered(records: readonly DiscoveredToolSkill[]): ToolSk
 // ────────────────────────── 内部 ──────────────────────────
 
 /** 单个扫描根的子目录（竞品 scan_flat_dir 的递归版本，层数由 MAX_SKILL_DEPTH 封顶）。 */
-function scanDir(
+async function scanDir(
   target: ScanTarget,
   root: string,
   rel: string,
@@ -133,7 +133,7 @@ function scanDir(
   opts: ToolScanOptions,
   managed: Set<string>,
   out: DiscoveredToolSkill[],
-): void {
+): Promise<void> {
   // depth 是 root 相对 skills 根的层数；子目录是 depth+1 层，超过上限就不再往下看
   if (depth >= MAX_SKILL_DEPTH) return;
 
@@ -161,14 +161,14 @@ function scanDir(
       // 命中即停：父目录自带 SKILL.md 说明它本身就是技能，不再把子目录当技能（skills don't nest）
       if (synced && opts.includeSynced !== true) continue;
       out.push(
-        describeSkillDir(target, dir, childRel, groupOfSkillRelPath(childRel), synced),
+        await describeSkillDir(target, dir, childRel, groupOfSkillRelPath(childRel), synced),
       );
       continue;
     }
 
     // 整个目录已由本工具接管（group 形态）：不再下钻，避免把库内技能重复发现一遍
     if (synced) continue;
-    scanDir(target, dir, childRel, depth + 1, opts, managed, out);
+    await scanDir(target, dir, childRel, depth + 1, opts, managed, out);
   }
 }
 
@@ -194,13 +194,13 @@ function isLinkIntoDir(target: string, dir: string): boolean {
   return resolved === base || resolved.startsWith(base + path.sep);
 }
 
-function describeSkillDir(
+async function describeSkillDir(
   target: ScanTarget,
   dir: string,
   relPath: string,
   group: string | null,
   isManagedLink: boolean,
-): DiscoveredToolSkill {
+): Promise<DiscoveredToolSkill> {
   // 复用既有发现器的描述逻辑（名称/描述/大小/可执行脚本），再补竞品需要的 fingerprint 与 mtime
   const base = describeForDiscovery(dir, relPath, {
     type: 'machine-scan',
@@ -209,7 +209,8 @@ function describeSkillDir(
 
   let fingerprint: string | null = null;
   try {
-    fingerprint = hashAndSizeSkillDir(dir).hash;
+    // 异步哈希：扫描大目录时不在主进程逐技能同步读全文件（切页「未响应」来源之一）
+    fingerprint = (await hashAndSizeSkillDirAsync(dir)).hash;
   } catch {
     // 读取失败（权限/竞态）不阻断扫描：保留条目，fingerprint 留空
   }

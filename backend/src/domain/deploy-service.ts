@@ -11,12 +11,13 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WriteLock } from '../infra/write-lock';
-import { readSkillMeta, skillMetaPath } from '../infra/fs-meta';
+import { readSkillMeta, readSkillMetaAsync, skillMetaPath } from '../infra/fs-meta';
 import {
   LinkError,
   createDirLink,
   ensureDir,
   inspectTarget,
+  inspectTargetAsync,
   isPathInside,
   removeDirLink,
   resolveLinkPath,
@@ -205,8 +206,8 @@ export class SkillDeployService {
    * 成功后把 Agent 记入该技能的同步意图（随库进 Git）并发 deploy-status 事件。
    */
   async syncToAgents(skillIds: string[], agentIds: string[]): Promise<SyncToAgentsResult> {
-    return this.lock.runExclusive('deploy', () => {
-      this.ensurePlacement(agentIds);
+    return this.lock.runExclusive('deploy', async () => {
+      await this.ensurePlacement(agentIds);
       const items: DeployItemResult[] = [];
       for (const skillId of skillIds) {
         for (const agentId of agentIds) items.push(this.deployOneUnlocked(skillId, agentId));
@@ -218,17 +219,17 @@ export class SkillDeployService {
 
   /** 中心库页面只读预检查：同名目标按内容分成自动接管和待用户选择两类。 */
   async planSyncToAgents(skillIds: string[], agentIds: string[]): Promise<DeployPlanItem[]> {
-    return this.lock.runExclusive('deploy-plan', () => {
+    return this.lock.runExclusive('deploy-plan', async () => {
       // 预检与执行必须看同一张落点表，否则会出现「预检说待同步、点了报冲突」
-      this.ensurePlacement(agentIds);
+      await this.ensurePlacement(agentIds);
       return skillIds.flatMap((skillId) => agentIds.map((agentId) => this.planOneUnlocked(skillId, agentId)));
     });
   }
 
   /** Read-only comparison of the exact placement used by deployment. */
   async syncDiff(request: LibrarySyncDiffRequest): Promise<LibrarySyncDiffResult> {
-    return this.lock.runExclusive('deploy-plan', () => {
-      this.ensurePlacement([request.agentId]);
+    return this.lock.runExclusive('deploy-plan', async () => {
+      await this.ensurePlacement([request.agentId]);
       const plan = this.planOneUnlocked(request.skillId, request.agentId);
       if (plan.status !== 'conflict' || plan.fingerprint !== request.fingerprint || plan.sourceHash !== request.sourceHash) {
         return { stale: true, sourceMtime: null, targetMtime: null, files: [], source: null, target: null };
@@ -242,8 +243,8 @@ export class SkillDeployService {
 
   /** 逐项执行，冲突只接受与预检查一致的显式选择。其他直接调用者仍走原有无覆盖接口。 */
   async syncToAgentsResolved(skillIds: string[], agentIds: string[], decisions: DeployDecision[]): Promise<SyncToAgentsResult> {
-    return this.lock.runExclusive('deploy', () => {
-      this.ensurePlacement(agentIds);
+    return this.lock.runExclusive('deploy', async () => {
+      await this.ensurePlacement(agentIds);
       const choices = new Map(decisions.map((d) => [`${d.skillId}\0${d.agentId}`, d]));
       const items: DeployItemResult[] = [];
       for (const skillId of skillIds) {
@@ -281,8 +282,8 @@ export class SkillDeployService {
 
   /** Agents 页单项冲突：显式确认后建链。 */
   async resolveAgentConflict(decision: DeployDecision): Promise<DeployItemResult> {
-    return this.lock.runExclusive('deploy', () => {
-      this.ensurePlacement([decision.agentId]);
+    return this.lock.runExclusive('deploy', async () => {
+      await this.ensurePlacement([decision.agentId]);
       const plan = this.planOneUnlocked(decision.skillId, decision.agentId);
       if (plan.status !== 'conflict' || plan.fingerprint !== decision.fingerprint || plan.sourceHash !== decision.sourceHash) {
         return { ...this.planToResult(plan), status: 'conflict', reason: '内容已变化，请重新查看差异' };
@@ -539,7 +540,7 @@ export class SkillDeployService {
    * 意图取元数据 sync.agents：链接断了之后 deployedAgents（意图 ∩ 实测）会变空，不能用它。
    */
   async relinkMoved(items: readonly MovedSkill[]): Promise<DeployItemResult[]> {
-    return this.lock.runExclusive('deploy', () => {
+    return this.lock.runExclusive('deploy', async () => {
       const results: DeployItemResult[] = [];
       for (const item of items) {
         const skill = this.findSkill(item.skillId);
@@ -821,8 +822,40 @@ export class SkillDeployService {
     return flat;
   }
 
+  /**
+   * resolveAgentTarget 的异步版（判定逻辑与同步版保持一致）：批量探针专用，
+   * 把落点表读取与 lstat/readdir 从同步等待改为并行 IO（首屏列表探针路径）。
+   */
+  private async resolveAgentTargetAsync(agent: AgentInfo, dirName: string): Promise<string> {
+    const srcDir = this.librarySkillDir(dirName);
+    const flat = path.join(agent.skillsDir, dirName);
+    // ① 落点记忆优先（与同步版同口径）
+    const recorded = (await this.placement?.readAsync(agent.id))?.[dirName];
+    if (recorded != null) {
+      const remembered = path.join(agent.skillsDir, ...recorded.split('/'));
+      if (isPathInside(agent.skillsDir, remembered)) return remembered;
+    }
+    const flatInsp = await inspectTargetAsync(flat);
+    if (flatInsp.kind !== 'missing') return flat;
+
+    // ② 空缺时一层子目录回找（只认指向本技能的链接）
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(agent.skillsDir, { withFileTypes: true });
+    } catch {
+      return flat;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || !entry.isDirectory()) continue;
+      const nested = path.join(agent.skillsDir, entry.name, dirName);
+      const insp = await inspectTargetAsync(nested);
+      if (insp.kind === 'link' && samePath(insp.resolvedTarget, srcDir)) return nested;
+    }
+    return flat;
+  }
+
   /** 同步前补齐落点记忆：该 Agent 还没有表（或表为空）时，先扫一次它的目录写一份。 */
-  private ensurePlacement(agentIds: readonly string[]): void {
+  private async ensurePlacement(agentIds: readonly string[]): Promise<void> {
     const store = this.placement;
     if (store == null) return;
     for (const agentId of new Set(agentIds)) {
@@ -830,7 +863,7 @@ export class SkillDeployService {
       const agent = this.agents.get(agentId);
       if (!agent || !agent.installed) continue;
       try {
-        const plan = scanLocalSkills({
+        const plan = await scanLocalSkills({
           targets: [{ key: agent.id, label: agent.name, dir: agent.skillsDir }],
           centralSkillsDir: this.library.skillsDir,
           includeSynced: true,
@@ -858,23 +891,72 @@ export class SkillDeployService {
 
   /** 中心库列表的部署状态叠加：deployedAgents = 意图 ∩ 实际链接。 */
   createProbe(): DeploymentStatusProbe {
+    const verifyOne = (
+      skill: Pick<SkillSummary, 'skillId' | 'dirName' | 'deployedAgents'>,
+      intent: string[],
+    ): { deployed: string[]; configured: string[] } => {
+      const deployed: string[] = [];
+      const configured: string[] = [];
+      const srcDir = this.librarySkillDir(skill.dirName);
+      for (const agentId of intent) {
+        const agent = this.agents.get(agentId);
+        if (!agent) continue; // 本机不存在的 Agent：意图只来自别的机器，过滤
+        if (agent.enabled && agent.installed) configured.push(agentId);
+        const insp = inspectTarget(this.resolveAgentTarget(agent, skill.dirName));
+        if (insp.kind === 'link' && samePath(insp.resolvedTarget, srcDir)) deployed.push(agentId);
+      }
+      return { deployed, configured };
+    };
+
     return {
       verify: (skill) => {
         // 意图的真相是元数据文件（随库进 Git）；索引里的 sync_json 是派生值，
         // 刚写完意图、尚未重扫时可能滞后，故以元数据为准、索引值兜底。
         const meta = readSkillMeta(this.library.skillsDir, skill.dirName);
         const intent = meta?.sync.agents ?? skill.deployedAgents ?? [];
-        const deployed: string[] = [];
-        const configured: string[] = [];
-        const srcDir = this.librarySkillDir(skill.dirName);
-        for (const agentId of intent) {
-          const agent = this.agents.get(agentId);
-          if (!agent) continue; // 本机不存在的 Agent：意图只来自别的机器，过滤
-          if (agent.enabled && agent.installed) configured.push(agentId);
-          const insp = inspectTarget(this.resolveAgentTarget(agent, skill.dirName));
-          if (insp.kind === 'link' && samePath(insp.resolvedTarget, srcDir)) deployed.push(agentId);
+        return verifyOne(skill, intent);
+      },
+
+      // 批量异步版：判定口径与 verify 完全一致，IO 全部并行（列表页首屏专用）。
+      // 结果按 intent 顺序装配，与同步版逐条 push 的顺序一致。
+      verifyBatch: async (skills) => {
+        const metas = await Promise.all(
+          skills.map((skill) => readSkillMetaAsync(this.library.skillsDir, skill.dirName)),
+        );
+        const resolved = await Promise.all(
+          skills.map((skill, i) => {
+            const intent = metas[i]?.sync.agents ?? skill.deployedAgents ?? [];
+            return Promise.all(
+              intent.map(async (agentId) => {
+                const agent = this.agents.get(agentId);
+                if (!agent) return { agentId, target: null as string | null, installed: false };
+                const target = await this.resolveAgentTargetAsync(agent, skill.dirName);
+                return { agentId, target, installed: agent.enabled && agent.installed };
+              }),
+            );
+          }),
+        );
+        const out = new Map<string, { deployed: string[]; configured: string[] }>();
+        for (let i = 0; i < skills.length; i++) {
+          const srcDir = this.librarySkillDir(skills[i].dirName);
+          // 二段并行：先并行 lstat 所有落点，再按 intent 顺序装配（与同步版顺序一致）
+          const inspected = await Promise.all(
+            resolved[i].map(async (item) => ({
+              agentId: item.agentId,
+              installed: item.installed,
+              insp: item.target == null ? null : await inspectTargetAsync(item.target),
+            })),
+          );
+          const deployed: string[] = [];
+          const configured: string[] = [];
+          for (const item of inspected) {
+            if (item.insp == null) continue; // 本机不存在的 Agent：意图只来自别的机器，过滤
+            if (item.installed) configured.push(item.agentId);
+            if (item.insp.kind === 'link' && samePath(item.insp.resolvedTarget, srcDir)) deployed.push(item.agentId);
+          }
+          out.set(skills[i].skillId, { deployed, configured });
         }
-        return { deployed, configured };
+        return out;
       },
     };
   }

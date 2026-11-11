@@ -28,6 +28,8 @@ export interface PlacementLogger {
 export interface PlacementStore {
   /** 该 Agent 的落点表（相对 skills 根，如 `github/lark`）；无文件/损坏时返回空表 */
   read(agentId: string): Record<string, string>;
+  /** read 的异步版（批量探针用，避免首屏列表逐 Agent 同步读文件） */
+  readAsync(agentId: string): Promise<Record<string, string>>;
   /** 整份重写；内容未变不写盘，返回是否真的写了 */
   writeAll(agentId: string, skills: Record<string, string>): boolean;
   /** 单条更新（同步成功后） */
@@ -86,6 +88,23 @@ export function createPlacementStore(opts: { libraryDir: string; logger?: Placem
     } catch {
       return {};
     }
+    return parsePlacementRaw(raw, agentId);
+  };
+
+  const readAsync = async (agentId: string): Promise<Record<string, string>> => {
+    const file = filePath(agentId);
+    if (file == null) return {};
+    let raw: string;
+    try {
+      raw = await fs.promises.readFile(file, 'utf8');
+    } catch {
+      return {};
+    }
+    return parsePlacementRaw(raw, agentId);
+  };
+
+  /** 落点表原始文本 → 校验后的映射；损坏按「没有记录」处理（下次扫描整份重写恢复）。 */
+  const parsePlacementRaw = (raw: string, agentId: string): Record<string, string> => {
     try {
       const parsed = JSON.parse(raw) as { skills?: unknown };
       const skills = parsed?.skills;
@@ -96,7 +115,6 @@ export function createPlacementStore(opts: { libraryDir: string; logger?: Placem
       }
       return out;
     } catch {
-      // 损坏的文件按「没有记录」处理：下次扫描整份重写即可恢复
       opts.logger?.error('placement:unreadable', { agentId });
       return {};
     }
@@ -154,5 +172,5 @@ export function createPlacementStore(opts: { libraryDir: string; logger?: Placem
     }
   };
 
-  return { read, writeAll, set, remove, removeFile, filePath };
+  return { read, readAsync, writeAll, set, remove, removeFile, filePath };
 }

@@ -22,6 +22,14 @@ export interface LibraryWatcherOptions {
   selfWriteWindowMs?: number;
   /** 事件去抖，默认 250ms */
   debounceMs?: number;
+  /**
+   * 启动静默期（ms）：start() 后该窗口内的事件直接丢弃，默认 0 = 不启用。
+   * 动机（2026-11-09）：开机后系统扫描类进程（杀软/索引器/同步盘）触碰技能目录
+   * 的**纯读操作**也会产生 change 事件（atime/属性更新），曾致每次启动后固定
+   * 触发一次整库重扫。静默期内真实外部改动的兜底 =「打开中心库页触发 rescan」，
+   * 不依赖监视（见类头注释）。
+   */
+  quietPeriodMs?: number;
 }
 
 interface MutedRoot {
@@ -38,6 +46,8 @@ export class LibraryWatcher {
   private sawUnnamedEvent = false;
   private muted: MutedRoot[] = [];
   private stopped = false;
+  /** 启动静默期截止时刻；0 = 已过静默期（或未启用）。 */
+  private quietUntil = 0;
 
   constructor(opts: LibraryWatcherOptions) {
     this.opts = {
@@ -45,12 +55,14 @@ export class LibraryWatcher {
       onExternalChange: opts.onExternalChange,
       selfWriteWindowMs: opts.selfWriteWindowMs ?? 1500,
       debounceMs: opts.debounceMs ?? 250,
+      quietPeriodMs: opts.quietPeriodMs ?? 0,
     };
   }
 
   start(): void {
     fs.mkdirSync(this.opts.dir, { recursive: true });
 
+    this.quietUntil = Date.now() + this.opts.quietPeriodMs;
     this.fsWatcher = fs.watch(this.opts.dir, { recursive: true });
     this.fsWatcher
       .on('change', (_eventType: fs.WatchEventType, filename: string | Buffer | null) =>
@@ -97,6 +109,10 @@ export class LibraryWatcher {
     const unnamed = this.sawUnnamedEvent;
     this.sawUnnamedEvent = false;
     if (this.stopped || (paths.length === 0 && !unnamed)) return;
+
+    // 启动静默期：整批丢弃（不延迟）。开机风暴期间的真实外部改动
+    // 由「打开中心库页触发 rescan」兜底，不依赖监视。
+    if (Date.now() < this.quietUntil) return;
 
     const now = Date.now();
     this.muted = this.muted.filter((m) => m.deadline > now);

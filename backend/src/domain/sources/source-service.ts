@@ -20,7 +20,7 @@ import { generateSkillId } from '../skill-id';
 import { SkillLibraryService } from '../library';
 import { readSkillMeta, SKILL_META_SCHEMA_VERSION, skillsDirJoin } from '../../infra/fs-meta';
 import type { WriteLock } from '../../infra/write-lock';
-import { gitCloneShallow, gitRevision, validateGitSource } from '../../infra/git-clone';
+import { gitCloneShallowAsync, gitRevisionAsync, validateGitSource } from '../../infra/git-clone';
 import { extractZipSafe } from '../../infra/zip-extract';
 import { discoverInDir, discoverRecursive } from './discovery';
 import type {
@@ -75,19 +75,19 @@ export class SkillSourceService {
    * Git 仓库：`git clone --depth 1` 到 TEMP 会话目录后扫描。
    * 网络/凭据失败抛 SourceError（code + detail）。
    */
-  discoverFromGit(url: string, opts?: { branch?: string }): DiscoveryResult {
+  async discoverFromGit(url: string, opts?: { branch?: string }): Promise<DiscoveryResult> {
     const origin = url.trim();
     validateGitSource(origin);
     const sessionDir = this.mkSession('git');
     let repoDir: string;
     try {
       repoDir = path.join(sessionDir, 'repo');
-      gitCloneShallow(origin, repoDir, { branch: opts?.branch });
+      await gitCloneShallowAsync(origin, repoDir, { branch: opts?.branch });
     } catch (err) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
       throw err;
     }
-    const revision = gitRevision(repoDir);
+    const revision = await gitRevisionAsync(repoDir);
     const items = discoverRecursive(repoDir, { type: 'git', origin,
       ...(opts?.branch ? { sourceBranch: opts.branch } : {}),
       ...(revision ? { sourceRevision: revision } : {}) });

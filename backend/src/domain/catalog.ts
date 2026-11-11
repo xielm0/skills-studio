@@ -144,8 +144,8 @@ export class SkillCatalogService {
   // ────────────────────────── 列表与筛选 ──────────────────────────
 
   /** 组合筛选：query（名称/描述）+ group + sourceType + agentId。 */
-  list(filter: LibraryListRequest = {}): LibraryListResult {
-    const rows = this.rows(filter.folder);
+  async list(filter: LibraryListRequest = {}): Promise<LibraryListResult> {
+    const rows = await this.rows(filter.folder);
     const query = (filter.query ?? '').trim().toLowerCase();
     const group = (filter.group ?? '').trim();
     const sourceType = (filter.sourceType ?? '').trim();
@@ -172,8 +172,8 @@ export class SkillCatalogService {
   }
 
   /** 筛选可选值：Group / 来源 / 启用中的 Agent（计数按当前文件夹，不受其他筛选影响）。 */
-  facets(folder?: string): LibraryFacetsResult {
-    const rows = this.rows(folder);
+  async facets(folder?: string): Promise<LibraryFacetsResult> {
+    const rows = await this.rows(folder);
     const groups = new Map<string, number>();
     const sources = new Map<string, { label: string; count: number }>();
     const agents = new Map<string, number>();
@@ -351,9 +351,10 @@ export class SkillCatalogService {
 
   // ────────────────────────── 内部 ──────────────────────────
 
-  private rows(folder?: string): LibrarySkillRow[] {
+  /** 列表行（异步）：技能摘要走批量异步探针，首屏列表不在主进程逐技能同步 stat。 */
+  private async rows(folder?: string): Promise<LibrarySkillRow[]> {
     const agents = this.agents.list();
-    return this.library.listSkills()
+    return (await this.library.listSkillsWithDeployStatus())
       .filter((skill) => {
         if (folder === undefined) return true;
         const slash = skill.relPath.indexOf('/');

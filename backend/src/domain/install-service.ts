@@ -333,11 +333,11 @@ export class InstallService {
 
   // ────────────────────────── Git / 本地目录 / 压缩包 ──────────────────────────
 
-  gitParse(url: string): InstallDiscoveryResult {
+  async gitParse(url: string): Promise<InstallDiscoveryResult> {
     const trimmed = url.trim();
     if (trimmed.length === 0) throw new AgentError('BAD_REQUEST', 'Git 地址不能为空');
     const cache = this.replaceCache('git');
-    const discovered = this.sources.discoverFromGit(trimmed);
+    const discovered = await this.sources.discoverFromGit(trimmed);
     cache.sessionDir = discovered.sessionDir;
     const items = this.cacheDiscovered(cache, discovered.items, 'git');
     this.logger?.info('install:git-parse', { url: trimmed, count: items.length });
@@ -371,10 +371,10 @@ export class InstallService {
    * 与竞品的差异：`includeSynced` 保留已接管位置并标 `synced`，四态才能看到「已同步」；
    * 位置折叠后**全部位置都已接管**才判 synced，部分接管仍按库内状态显示（还有实体目录待收）。
    */
-  agentScan(): InstallDiscoveryResult {
+  async agentScan(): Promise<InstallDiscoveryResult> {
     const cache = this.replaceCache('scan');
     const targets = this.scanTargets();
-    const plan = scanLocalSkills({
+    const plan = await scanLocalSkills({
       targets,
       centralSkillsDir: this.library.skillsDir,
       managedPaths: this.managedTargetPaths(),

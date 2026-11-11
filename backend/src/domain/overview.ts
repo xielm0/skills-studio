@@ -33,8 +33,12 @@ export class OverviewService {
     this.now = opts.now ?? (() => new Date());
   }
 
-  overview(): LibraryOverview {
-    const skills = this.library.listSkills();
+  /**
+   * 概览（异步）：列表走批量异步探针（listSkillsWithDeployStatus），
+   * 首屏 IPC 不再在主进程逐技能同步 stat。
+   */
+  async overview(): Promise<LibraryOverview> {
+    const skills = await this.library.listSkillsWithDeployStatus();
     const skillCount = skills.filter((s) => !s.missing).length;
     const deployed = skills.filter((s) => !s.missing && s.deployedAgents.length > 0).length;
     const connected = this.agents.list().filter((a) => a.enabled && a.installed).length;
@@ -45,8 +49,9 @@ export class OverviewService {
     };
   }
 
-  recentActivity(): RecentActivityResult {
-    const skills = new Map(this.library.listSkills().map((s) => [s.skillId, s]));
+  /** 近期动态（异步）：同上，技能摘要走批量异步探针。 */
+  async recentActivity(): Promise<RecentActivityResult> {
+    const skills = new Map((await this.library.listSkillsWithDeployStatus()).map((s) => [s.skillId, s]));
     const agentNames = new Map(this.agents.list().map((a) => [a.id, a.name]));
     const now = this.now();
     const items: RecentActivityItem[] = [];

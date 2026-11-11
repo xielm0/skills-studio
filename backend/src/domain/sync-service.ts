@@ -73,10 +73,10 @@ export class SyncService {
 
   // ───────────────────────── 状态 ─────────────────────────
 
-  status(): SyncStatusResult {
-    const st = this.backup.getStatus();
+  async status(): Promise<SyncStatusResult> {
+    const st = await this.backup.getStatus();
     const activity = this.readActivity();
-    const conflicts = this.conflictViews(this.backup.listConflicts());
+    const conflicts = await this.conflictViews(this.backup.listConflicts());
     return {
       connected: Boolean(st.remoteUrl),
       gitAvailable: st.gitAvailable,
@@ -108,7 +108,7 @@ export class SyncService {
   async connect(url: string): Promise<SyncStatusResult> {
     let probe: RemoteProbe;
     try {
-      probe = this.backup.probeRemote(url);
+      probe = await this.backup.probeRemote(url);
     } catch (err) {
       throw this.asSyncError(err);
     }
@@ -128,7 +128,7 @@ export class SyncService {
   // ───────────────────────── Pull ─────────────────────────
 
   async pull(): Promise<SyncPullResult> {
-    const before = this.backup.getStatus().headCommit;
+    const before = (await this.backup.getStatus()).headCommit;
     let raw;
     try {
       raw = await this.backup.pull();
@@ -147,15 +147,15 @@ export class SyncService {
           commits: 0,
           adopted: [],
           removed: 0,
-          conflicts: this.conflictViews(this.backup.listConflicts()),
+          conflicts: await this.conflictViews(this.backup.listConflicts()),
         };
         this.record('lastPull', result.status, message);
         return result;
       }
       throw this.asSyncError(err);
     }
-    const commits = raw.commitId ? this.backup.countCommitsBetween(before, raw.commitId) : 0;
-    const pending = this.conflictViews(this.backup.listConflicts());
+    const commits = raw.commitId ? await this.backup.countCommitsBetween(before, raw.commitId) : 0;
+    const pending = await this.conflictViews(this.backup.listConflicts());
     const result = this.buildPullResult(raw, pending, commits);
     this.record('lastPull', result.status, result.message);
     return result;
@@ -202,7 +202,7 @@ export class SyncService {
     return {
       items,
       summary,
-      remainingConflicts: this.conflictViews(this.backup.listConflicts()),
+      remainingConflicts: await this.conflictViews(this.backup.listConflicts()),
     };
   }
 
@@ -252,8 +252,8 @@ export class SyncService {
 
   // ───────────────────────── 历史与版本 ─────────────────────────
 
-  history(): SyncHistoryResult {
-    const items = this.backup.listHistoryBatched({ limit: 100 }).map((commit) => {
+  async history(): Promise<SyncHistoryResult> {
+    const items = (await this.backup.listHistoryBatched({ limit: 100 })).map((commit) => {
       const { note, summary } = splitMessage(commit.message);
       return {
         sha: commit.commitId,
@@ -268,14 +268,14 @@ export class SyncService {
     return { items };
   }
 
-  versionDetail(sha: string): SyncVersionDetailResult {
-    const summary = this.backup.getCommitSummary(sha);
+  async versionDetail(sha: string): Promise<SyncVersionDetailResult> {
+    const summary = await this.backup.getCommitSummary(sha);
     if (!summary) throw new SyncError('BAD_REQUEST', `未找到版本 ${sha.slice(0, 8)}，可能已被清理`);
     const names = new Map(this.library.listSkills().map((skill) => [skill.dirName, skill.name]));
-    const changedSkills = summary.changedSkills.map((dirName) => {
+    const changedSkills = await Promise.all(summary.changedSkills.map(async (dirName) => {
       let diff = { added: [] as string[], modified: [] as string[], removed: [] as string[], reportChanged: false };
       try {
-        const fileDiff = this.backup.getCommitSkillDiff(summary.commitId, dirName);
+        const fileDiff = await this.backup.getCommitSkillDiff(summary.commitId, dirName);
         diff = {
           added: fileDiff.files.added,
           modified: fileDiff.files.modified,
@@ -293,7 +293,7 @@ export class SyncService {
         removed: diff.removed,
         reportChanged: diff.reportChanged,
       };
-    });
+    }));
     const { note, summary: body } = splitMessage(summary.message);
     return {
       sha: summary.commitId,
@@ -313,7 +313,7 @@ export class SyncService {
   // ───────────────────────── 恢复 ─────────────────────────
 
   async restore(sha: string): Promise<SyncRestoreResult> {
-    const st = this.backup.getStatus();
+    const st = await this.backup.getStatus();
     if (!st.initialized || !st.headCommit) {
       throw new SyncError('BAD_REQUEST', '还没有可恢复的备份版本，请先连接远端并 Pull 或 Push');
     }
@@ -386,32 +386,32 @@ export class SyncService {
     };
   }
 
-  private conflictViews(pins: PendingConflictInfo[]): SyncConflictView[] {
-    return pins.map((pin) => ({
+  private async conflictViews(pins: PendingConflictInfo[]): Promise<SyncConflictView[]> {
+    return Promise.all(pins.map(async (pin) => ({
       conflictId: pin.skillId,
       skillId: pin.skillId,
       skillName: pin.local.name ?? pin.remote.name ?? pin.dirName ?? pin.skillId,
       dirName: pin.dirName,
       kind: pin.kind,
       components: pin.components,
-      local: this.sideView(pin.local, pin.pinnedAt),
-      remote: this.sideView(pin.remote, pin.pinnedAt),
+      local: await this.sideView(pin.local, pin.pinnedAt),
+      remote: await this.sideView(pin.remote, pin.pinnedAt),
       remoteAdvanced: Boolean(pin.remoteAdvancedAt),
-    }));
+    })));
   }
 
-  private sideView(side: ConflictSideSummary, fallbackTime: string): SyncConflictSideView {
+  private async sideView(side: ConflictSideSummary, fallbackTime: string): Promise<SyncConflictSideView> {
     return {
-      time: this.commitTime(side.commit) ?? fallbackTime,
+      time: (await this.commitTime(side.commit)) ?? fallbackTime,
       summary: sideText(side),
       files: side.changedFiles,
     };
   }
 
-  private commitTime(commit: string): string | null {
+  private async commitTime(commit: string): Promise<string | null> {
     // 提交不可变：同一提交的时间只查一次（刷新状态时避免重复 spawn git）
     if (this.commitTimes.has(commit)) return this.commitTimes.get(commit) ?? null;
-    const time = this.backup.getCommitTime(commit);
+    const time = await this.backup.getCommitTime(commit);
     this.commitTimes.set(commit, time);
     return time;
   }

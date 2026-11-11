@@ -170,4 +170,13 @@ export interface DeploymentStatusProbe {
     deployed: string[];
     configured: string[];
   };
+  /**
+   * 批量异步校验（可选）：列表页用它把逐技能×逐 Agent 的文件系统检查改为并行 IO，
+   * 避免主进程同步等待几十次 stat（首屏「未响应」来源之一）。
+   * 实现未提供时调用方回退逐条 verify（语义一致，只是同步阻塞）。
+   * 返回以 skillId 为键；缺键的技能按「无实测部署」处理。
+   */
+  verifyBatch?(
+    skills: ReadonlyArray<Pick<SkillSummary, 'skillId' | 'dirName' | 'deployedAgents'>>,
+  ): Promise<Map<string, { deployed: string[]; configured: string[] }>>;
 }

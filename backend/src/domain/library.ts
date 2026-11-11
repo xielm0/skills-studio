@@ -14,6 +14,7 @@ import {
   migrateSkillMetaDirLayout,
   migrateSkillMetaLayout,
   readSkillMeta,
+  skillMetaDir,
   skillMetaPath,
   skillsDirJoin,
   skillsDirOf,
@@ -23,7 +24,7 @@ import { LibraryWatcher } from '../infra/library-watcher';
 import { migratePlacementDirLayout } from './placement-store';
 import { SkillIndexStore, type SkillIndexRecord } from '../infra/sqlite-index';
 import type { WriteLock } from '../infra/write-lock';
-import { hashAndSizeSkillDir } from './content-hash';
+import { hashAndSizeSkillDirAsync } from './content-hash';
 import { buildFileTree } from './file-tree';
 import { isSkillDir } from './frontmatter';
 import { sameOrigin, sanitizeName } from './path-guard';
@@ -313,7 +314,7 @@ export class SkillLibraryService {
     // doRescan 是同步实现，直接执行不会与其它扫描交错。
     if (this.lock?.heldByCurrentChain) {
       try {
-        return Promise.resolve(this.doRescan());
+        return this.doRescan();
       } catch (err) {
         return Promise.reject(err);
       }
@@ -327,7 +328,7 @@ export class SkillLibraryService {
     return result;
   }
 
-  private doRescan(): RescanResult {
+  private async doRescan(): Promise<RescanResult> {
     const now = new Date().toISOString();
     const scanned = scanSkillsDir(this.skillsDir);
     const scannedDirNames = new Set(scanned.skills.map((s) => s.dirName));
@@ -341,7 +342,9 @@ export class SkillLibraryService {
     let restored = 0;
 
     for (const s of scanned.skills) {
-      const { hash, sizeBytes } = hashAndSizeSkillDir(s.path);
+      // 异步哈希：数千文件的库上，同步版会把主进程事件循环堵满整次扫描
+      // （数秒「未响应」）；异步版读文件间隙让路，消息泵保持响应
+      const { hash, sizeBytes } = await hashAndSizeSkillDirAsync(s.path);
       let meta = readSkillMeta(this.skillsDir, s.dirName);
 
       if (!meta) {
@@ -436,6 +439,10 @@ export class SkillLibraryService {
     }
 
     this.index.replaceAll(records);
+    // 收口自写抑制：重扫全程可能超过单文件 1.5s 抑制窗（冷盘全库哈希），
+    // 本轮写入的元数据回声若落在窗口外会再次触发重扫（自激循环）——
+    // 末尾对整个元数据目录再登记一次，覆盖「刚写完」的回声到达时间。
+    this.watcher?.noteSelfWrite(skillMetaDir(this.skillsDir));
     this.notifyRescanned();
     return { total: records.length, added, changed, missing, restored, events };
   }
@@ -493,6 +500,36 @@ export class SkillLibraryService {
     };
   }
 
+  /**
+   * listSkills 的批量异步版（首屏列表专用）：探针走 verifyBatch 并行 IO，
+   * 避免逐技能同步 stat 堵住主进程（判定口径与 listSkills 完全一致）。
+   * 探针未注入或未实现 verifyBatch 时，回退同步逐条 verify（语义不变）。
+   */
+  async listSkillsWithDeployStatus(filter?: { sourceType?: string; origin?: string }): Promise<SkillSummary[]> {
+    const all = this.index.list();
+    const filtered = filter
+      ? all.filter((s) => {
+          if (!s.source) return false;
+          if (filter.sourceType != null && s.source.type !== filter.sourceType) return false;
+          if (filter.origin != null && !sameOrigin(s.source.origin, filter.origin)) return false;
+          return true;
+        })
+      : all;
+    const probe = this.deploymentProbe;
+    if (probe == null) return filtered;
+    if (probe.verifyBatch == null) return filtered.map((s) => this.withDeployStatus(s));
+    const results = await probe.verifyBatch(filtered);
+    return filtered.map((s) => {
+      const result = results.get(s.skillId) ?? { deployed: [], configured: [] };
+      return {
+        ...s,
+        deployedAgents: result.deployed,
+        configuredAgents: result.configured,
+        configuredNotDeployed: result.configured.length > result.deployed.length,
+      };
+    });
+  }
+
   /** 技能详情；含按需构建的真实文件树（不预读文件内容）。 */
   getSkillDetail(skillId: string): SkillDetail | null {
     const row = this.index.getFull(skillId);
@@ -534,11 +571,19 @@ export class SkillLibraryService {
     return this.activity.count();
   }
 
-  /** 启动文件监视 + 3 秒轮询兜底。 */
-  startWatching(): void {
+  /**
+   * 启动文件监视（事件驱动，无轮询）。
+   * @param options.quietPeriodMs 启动静默期，默认 15_000：开机后系统扫描类进程
+   * （杀软/索引器/同步盘）对技能目录的**纯读**也会产生 change 事件，曾致每次
+   * 启动后固定触发一次整库重扫（2026-11-09 日志：window:shown 后 +3.3s 必现
+   * external-change）。静默期内真实外部改动由「打开中心库页触发 rescan」兜底，
+   * 不依赖监视；测试验证 watcher 即时性时传 0 关闭。
+   */
+  startWatching(options?: { quietPeriodMs?: number }): void {
     if (this.watcher) return;
     this.watcher = new LibraryWatcher({
       dir: this.skillsDir,
+      quietPeriodMs: options?.quietPeriodMs ?? 15_000,
       onExternalChange: (paths) => {
         this.logger?.info('library:external-change', { paths: paths.length });
         void this.rescan();

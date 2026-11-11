@@ -22,8 +22,8 @@ import {
   assertGitInstalled,
   classifyGitFailure,
   isGitInstalled,
-  runGit,
-  runGitOk,
+  runGitAsync,
+  runGitOkAsync,
   validateRemoteUrl,
 } from '../infra/git';
 import { createGitObjectReader } from '../infra/git-objects';
@@ -253,17 +253,17 @@ export class BackupService {
 
   // ───────────────────────── 配置与状态 ─────────────────────────
 
-  getStatus(): BackupStatus {
+  async getStatus(): Promise<BackupStatus> {
     const available = isGitInstalled();
-    const initialized = available && this.hasRepo();
+    const initialized = available && await this.hasRepo();
     let head: string | null = null;
     let snapshotCount = 0;
     let lastCommit: LastCommitInfo | null = null;
     if (initialized) {
       try {
-        head = this.head();
-        snapshotCount = this.listSnapshots().length;
-        lastCommit = this.latestCommitInfo();
+        head = await this.head();
+        snapshotCount = (await this.listSnapshots()).length;
+        lastCommit = await this.latestCommitInfo();
       } catch {
         /* 仓库损坏时状态如实降级 */
       }
@@ -290,12 +290,12 @@ export class BackupService {
   async commit(opts: { message?: string } = {}): Promise<LocalCommitResult> {
     return this.lock.runExclusive('backup-commit', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       this.assertLocalProtocol();
       await this.library.rescan();
-      const before = this.head();
-      const { commit } = this.commitWorktree(
+      const before = await this.head();
+      const { commit } = await this.commitWorktree(
         opts.message ?? '本地备份',
         { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
         before ? [before] : [],
@@ -311,7 +311,7 @@ export class BackupService {
     return this.lock.runExclusive('backup-configure', async () => {
       assertGitInstalled();
       const url = validateRemoteUrl(rawUrl);
-      this.ensureRepo();
+      await this.ensureRepo();
       this.writeConfig({ ...this.readConfig(), remoteUrl: url });
       return this.getStatus();
     });
@@ -321,7 +321,7 @@ export class BackupService {
   async init(opts: { remoteUrl?: string } = {}): Promise<BackupStatus> {
     return this.lock.runExclusive('backup-init', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       if (opts.remoteUrl) {
         const url = validateRemoteUrl(opts.remoteUrl);
@@ -335,12 +335,12 @@ export class BackupService {
    * 只读探测远端（连接前校验可达性/认证/分支状态）：
    * 不改本机仓库、不写配置，失败时给出可读原因，供备份页「连接」直接提示。
    */
-  probeRemote(rawUrl: string): RemoteProbe {
+  async probeRemote(rawUrl: string): Promise<RemoteProbe> {
     assertGitInstalled();
     const url = validateRemoteUrl(rawUrl);
     const branch = this.readConfig().branch;
     fs.mkdirSync(this.libraryDir, { recursive: true });
-    const res = runGit(['ls-remote', '--heads', url, `refs/heads/${branch}`], {
+    const res = await runGitAsync(['ls-remote', '--heads', url, `refs/heads/${branch}`], {
       cwd: this.libraryDir,
       timeoutMs: REMOTE_TIMEOUT_MS,
       allowFailure: true,
@@ -373,7 +373,7 @@ export class BackupService {
   async push(opts: { message?: string } = {}): Promise<PushResult> {
     return this.lock.runExclusive('sync-push', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       this.assertLocalProtocol();
       const cfg = this.requireRemote();
@@ -384,24 +384,24 @@ export class BackupService {
 
       await this.library.rescan();
       const excluded = this.applyExclusions();
-      const before = this.head();
-      const { commit } = this.commitWorktree(
+      const before = await this.head();
+      const { commit } = await this.commitWorktree(
         opts.message ?? '备份技能库',
         { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
         before ? [before] : [],
       );
       const head = commit ?? before;
       if (!head) throw new BackupError('SYNC_NOTHING_TO_COMMIT', '库中没有可备份的内容');
-      const snapshotRef = commit ? this.createSnapshot(commit, 'push') : null;
+      const snapshotRef = commit ? await this.createSnapshot(commit, 'push') : null;
 
       // 远端已经与本地一致 → 无需推送（避免把「没有新提交」误报成推送失败/成功）
-      const remoteHead = this.remoteHeadOf(cfg.remoteUrl, cfg.branch);
+      const remoteHead = await this.remoteHeadOf(cfg.remoteUrl, cfg.branch);
       if (remoteHead === head) {
         return { status: 'up-to-date', commitId: head, snapshotRef, excluded };
       }
 
       try {
-        runGit(['push', cfg.remoteUrl, `refs/heads/${cfg.branch}:refs/heads/${cfg.branch}`], {
+        runGitAsync(['push', cfg.remoteUrl, `refs/heads/${cfg.branch}:refs/heads/${cfg.branch}`], {
           cwd: this.libraryDir,
           timeoutMs: REMOTE_TIMEOUT_MS,
           operation: 'push',
@@ -434,7 +434,7 @@ export class BackupService {
   async pull(opts: PullOptions = {}): Promise<PullResult> {
     return this.lock.runExclusive('sync-pull', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       this.assertLocalProtocol();
       const cfg = this.requireRemote();
@@ -450,18 +450,18 @@ export class BackupService {
 
       // 1) 先取远端：协议不兼容时不做任何本机提交（零改动）
       try {
-        runGit(
+        runGitAsync(
           ['fetch', '--no-tags', cfg.remoteUrl, `+refs/heads/${cfg.branch}:refs/remotes/origin/${cfg.branch}`],
           { cwd: this.libraryDir, timeoutMs: REMOTE_TIMEOUT_MS, operation: 'fetch' },
         );
       } catch (err) {
         throw this.toBackupError(err);
       }
-      const remoteHead = this.revParse(`refs/remotes/origin/${cfg.branch}`);
+      const remoteHead = await this.revParse(`refs/remotes/origin/${cfg.branch}`);
       if (!remoteHead) {
         return {
           status: 'no-remote',
-          commitId: this.head(),
+          commitId: await this.head(),
           remoteCommit: null,
           adopted: [],
           removed: [],
@@ -484,10 +484,10 @@ export class BackupService {
       // 3) 空库 bootstrap：本机没有任何技能时直接采纳远端（不制造额外的合并历史）
       await this.library.rescan();
       const localSkillCount = this.library.listSkills().length;
-      const headBefore = this.head();
+      const headBefore = await this.head();
       if (!headBefore && localSkillCount === 0) {
         const beforeIds = this.skillIdSet();
-        this.updateBranch(remoteHead);
+        await this.updateBranch(remoteHead);
         this.applyTree(remoteHead);
         this.restoreLocalOrigins();
         await this.library.rescan();
@@ -504,13 +504,13 @@ export class BackupService {
       }
 
       // 4) 保存本机变更（未提交过则形成首个提交，保证本机历史不丢）
-      this.commitWorktree(
+      await this.commitWorktree(
         'Pull 前保存本机变更',
         { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
         headBefore ? [headBefore] : [],
         { force: !headBefore },
       );
-      const localHead = this.head();
+      const localHead = await this.head();
       if (!localHead) throw new BackupError('SYNC_NOTHING_TO_RESTORE', '本机库为空，无法开始 Pull');
 
       if (remoteHead === localHead) {
@@ -525,7 +525,7 @@ export class BackupService {
         };
       }
 
-      if (this.isAncestor(remoteHead, localHead)) {
+      if (await this.isAncestor(remoteHead, localHead)) {
         return {
           status: 'local-ahead',
           commitId: localHead,
@@ -537,10 +537,10 @@ export class BackupService {
         };
       }
 
-      if (this.isAncestor(localHead, remoteHead)) {
+      if (await this.isAncestor(localHead, remoteHead)) {
         const beforeIds = this.skillIdSet();
         const beforeHashes = this.hashAllSkills();
-        this.updateBranch(remoteHead);
+        await this.updateBranch(remoteHead);
         this.applyTree(remoteHead);
         this.restoreLocalOrigins();
         await this.library.rescan();
@@ -558,7 +558,7 @@ export class BackupService {
       }
 
       // 4) 分叉（或本机无共同历史）：对象级三方合并（无 pin：冲突一律整次失败）
-      const baseCommit = this.mergeBaseOrEmpty(localHead, remoteHead);
+      const baseCommit = await this.mergeBaseOrEmpty(localHead, remoteHead);
       const baseSnap: LibrarySnapshot = baseCommit
         ? buildLibrarySnapshot(reader, baseCommit)
         : { commit: null, skills: {} };
@@ -603,7 +603,7 @@ export class BackupService {
       }
 
       try {
-        const res = this.commitWorktree(
+        const res = await this.commitWorktree(
           `Pull 合并远端变更（base ${(baseCommit || 'empty').slice(0, 8)}）`,
           { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
           [localHead, remoteHead],
@@ -621,7 +621,7 @@ export class BackupService {
 
       return {
         status: 'merged',
-        commitId: this.head(),
+        commitId: await this.head(),
         remoteCommit: remoteHead,
         adopted: plan.adoptedFromRemote,
         removed: plan.removed,
@@ -633,21 +633,21 @@ export class BackupService {
 
   // ───────────────────────── 历史与差异 ─────────────────────────
 
-  listHistory(opts: { limit?: number } = {}): CommitSummary[] {
-    if (!this.hasRepo() || !this.head()) return [];
+  async listHistory(opts: { limit?: number } = {}): Promise<CommitSummary[]> {
+    if (!await this.hasRepo() || !await this.head()) return [];
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 500));
-    const out = runGit(['log', `-n${limit}`, '--pretty=format:%H%x1f%aI%x1f%an%x1f%B%x1e'], {
+    const out = (await runGitAsync(['log', `-n${limit}`, '--pretty=format:%H%x1f%aI%x1f%an%x1f%B%x1e'], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'log',
-    }).stdout;
+    })).stdout;
     const commits: CommitSummary[] = [];
     for (const record of out.split('\x1e')) {
       const trimmed = record.replace(/^\r?\n/, '');
       if (!trimmed.trim()) continue;
       const [commitId, committedAt, author, ...rest] = trimmed.split('\x1f');
       const message = rest.join('\x1f').trim();
-      const changedSkills = this.changedSkillsOf(commitId);
+      const changedSkills = await this.changedSkillsOf(commitId);
       commits.push({
         commitId,
         shortId: commitId.slice(0, 8),
@@ -666,14 +666,14 @@ export class BackupService {
    * 与 listHistory 结果同形，但避免逐提交 spawn 一个 `git diff`——
    * Windows 上每次子进程约 100~200ms，历史一长会把备份页拖到几秒。
    */
-  listHistoryBatched(opts: { limit?: number } = {}): CommitSummary[] {
-    if (!this.hasRepo() || !this.head()) return [];
+  async listHistoryBatched(opts: { limit?: number } = {}): Promise<CommitSummary[]> {
+    if (!await this.hasRepo() || !await this.head()) return [];
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 500));
     // \x1e 分隔提交，\x1f 分隔字段，\x02 结束头部（其后为 --name-only 的文件清单）
-    const out = runGit(
+    const out = (await runGitAsync(
       ['log', `-n${limit}`, '--name-only', '--no-renames', '--pretty=format:%x1e%H%x1f%aI%x1f%an%x1f%s%x1f%b%x02'],
       { cwd: this.libraryDir, allowFailure: true, operation: 'log' },
-    ).stdout;
+    )).stdout;
     const commits: CommitSummary[] = [];
     for (const record of out.split('\x1e')) {
       if (!record.trim()) continue;
@@ -698,30 +698,30 @@ export class BackupService {
   }
 
   /** 只读：单个提交的时间（冲突两侧的修改时间；不计算变更技能，避免多余子进程）。 */
-  getCommitTime(commitId: string): string | null {
-    const commit = this.resolveCommit(commitId);
+  async getCommitTime(commitId: string): Promise<string | null> {
+    const commit = await this.resolveCommit(commitId);
     if (!commit) return null;
-    const out = runGit(['log', '-n1', '--pretty=format:%aI', commit], {
+    const out = (await runGitAsync(['log', '-n1', '--pretty=format:%aI', commit], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'log',
-    }).stdout.trim();
+    })).stdout.trim();
     return out.length > 0 ? out : null;
   }
 
   /** 只读：单个提交的摘要（版本详情的说明/时间；冲突两侧的修改时间）。 */
-  getCommitSummary(commitId: string): CommitSummary | null {
-    const commit = this.resolveCommit(commitId);
+  async getCommitSummary(commitId: string): Promise<CommitSummary | null> {
+    const commit = await this.resolveCommit(commitId);
     if (!commit) return null;
-    const out = runGit(['log', '-n1', '--pretty=format:%H%x1f%aI%x1f%an%x1f%B', commit], {
+    const out = (await runGitAsync(['log', '-n1', '--pretty=format:%H%x1f%aI%x1f%an%x1f%B', commit], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'log',
-    }).stdout;
+    })).stdout;
     if (!out.trim()) return null;
     const [id, committedAt, author, ...rest] = out.split('\x1f');
     if (!id || !committedAt) return null;
-    const changedSkills = this.changedSkillsOf(commit);
+    const changedSkills = await this.changedSkillsOf(commit);
     return {
       commitId: id,
       shortId: id.slice(0, 8),
@@ -734,19 +734,19 @@ export class BackupService {
   }
 
   /** 只读：`from`（不含）..`to`（含）之间的提交数；用于 Pull 结果里的「N 个新版本」。 */
-  countCommitsBetween(from: string | null, to: string): number {
-    const target = this.resolveCommit(to);
+  async countCommitsBetween(from: string | null, to: string): Promise<number> {
+    const target = await this.resolveCommit(to);
     if (!target) return 0;
     const args = from
       ? ['rev-list', '--count', `${from}..${target}`]
       : ['rev-list', '--count', target];
-    const res = runGit(args, { cwd: this.libraryDir, allowFailure: true, operation: 'rev-list' });
+    const res = await runGitAsync(args, { cwd: this.libraryDir, allowFailure: true, operation: 'rev-list' });
     const count = Number(res.stdout.trim());
     return Number.isFinite(count) && count > 0 ? count : 0;
   }
 
   /** 某次提交对某技能的差异（文件级 changed/added/removed 摘要）。 */
-  getCommitSkillDiff(commitId: string, dirName: string): CommitSkillDiff {    const commit = this.resolveCommit(commitId);
+  async getCommitSkillDiff(commitId: string, dirName: string): Promise<CommitSkillDiff> {    const commit = await this.resolveCommit(commitId);
     if (!commit) throw new BackupError('GIT_COMMIT_NOT_FOUND', `未找到提交 ${commitId}`);
     const reader = createGitObjectReader(this.libraryDir);
     // 提交树元数据按布局演进逐层回退：sync/（2026-11-03 起）→ skills/.meta/（2026-11-02）→ 平铺 skills/
@@ -777,7 +777,7 @@ export class BackupService {
     const paths = [`skills/${contentRel}`, metaAt, legacyMetaAt];
     const reportPrefix = reportStem ? `reports/${reportStem}_review_` : null;
     if (reportPrefix) paths.push('reports');
-    const raw = this.diffFiles(this.parentOf(commit), commit, paths);
+    const raw = await this.diffFiles(await this.parentOf(commit), commit, paths);
     // reports 按整目录 diff 后再筛出本技能的那一份
     const owned = (file: string) => !file.startsWith('reports/') || (reportPrefix != null && file.startsWith(reportPrefix));
     const files = {
@@ -797,13 +797,13 @@ export class BackupService {
   }
 
   /** 本地快照 ref（每次 Push 与恢复/解决冲突前各一条；恢复可回退的依据）。 */
-  listSnapshots(): SnapshotInfo[] {
-    if (!this.hasRepo()) return [];
-    const out = runGit(['for-each-ref', '--format=%(refname)%1f%(objectname)', SNAPSHOT_REF_PREFIX], {
+  async listSnapshots(): Promise<SnapshotInfo[]> {
+    if (!await this.hasRepo()) return [];
+    const out = (await runGitAsync(['for-each-ref', '--format=%(refname)%1f%(objectname)', SNAPSHOT_REF_PREFIX], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'for-each-ref',
-    }).stdout;
+    })).stdout;
     const rows: SnapshotInfo[] = [];
     for (const line of out.split(/\r?\n/)) {
       if (!line.trim()) continue;
@@ -834,16 +834,16 @@ export class BackupService {
   async restore(opts: { commitId: string; skillId?: string }): Promise<RestoreResult> {
     return this.lock.runExclusive('sync-restore', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       this.assertLocalProtocol();
-      const target = this.resolveCommit(opts.commitId);
+      const target = await this.resolveCommit(opts.commitId);
       if (!target) throw new BackupError('GIT_COMMIT_NOT_FOUND', `未找到提交 ${opts.commitId}`);
       const reader = createGitObjectReader(this.libraryDir);
 
       await this.library.rescan();
-      const head = this.head();
-      const { commit: pre } = this.commitWorktree(
+      const head = await this.head();
+      const { commit: pre } = await this.commitWorktree(
         '恢复前快照',
         { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
         head ? [head] : [],
@@ -851,7 +851,7 @@ export class BackupService {
       );
       const preCommit = pre ?? head;
       if (!preCommit) throw new BackupError('SYNC_NOTHING_TO_RESTORE', '库中没有可恢复的内容');
-      const snapshotRef = this.createSnapshot(preCommit, 'pre-restore');
+      const snapshotRef = await this.createSnapshot(preCommit, 'pre-restore');
 
       if (opts.skillId) {
         const skillId = opts.skillId;
@@ -880,7 +880,7 @@ export class BackupService {
         if (beforeHash !== afterHash) {
           this.library.appendEvent(skillId, 'content-changed', `恢复：${current.dirName}`);
         }
-        this.commitWorktree(
+        await this.commitWorktree(
           `恢复技能：${current.dirName} 到 ${target.slice(0, 8)}`,
           { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
           [preCommit],
@@ -914,7 +914,7 @@ export class BackupService {
         .sort();
       this.emitChangedSince(beforeHashes, '恢复');
 
-      this.commitWorktree(
+      await this.commitWorktree(
         `恢复整库到 ${target.slice(0, 8)}`,
         { [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION) },
         [preCommit],
@@ -947,7 +947,7 @@ export class BackupService {
   async resolveConflict(skillId: string, choice: ConflictChoice): Promise<ResolveResult> {
     return this.lock.runExclusive('sync-resolve', async () => {
       assertGitInstalled();
-      this.ensureRepo();
+      await this.ensureRepo();
       this.ensureProtocolFile();
       this.assertLocalProtocol();
       if (!isSkillId(skillId)) throw new BackupError('SYNC_CONFLICT_NOT_FOUND', `Skill ID 非法：${skillId}`);
@@ -956,9 +956,9 @@ export class BackupService {
       if (!pin) throw new BackupError('SYNC_CONFLICT_NOT_FOUND', `没有待处理的冲突：${skillId}`);
 
       await this.library.rescan();
-      const head = this.head();
+      const head = await this.head();
       if (!head) throw new BackupError('SYNC_NOTHING_TO_RESTORE', '库中没有可提交的内容');
-      this.createSnapshot(head, `pre-resolve-${skillId.slice(0, 10)}`);
+      await this.createSnapshot(head, `pre-resolve-${skillId.slice(0, 10)}`);
 
       const reader = createGitObjectReader(this.libraryDir);
       const remoteSnap = buildLibrarySnapshot(reader, pin.remoteCommit);
@@ -1040,7 +1040,7 @@ export class BackupService {
 
       await this.library.rescan();
       const label = choice === 'keep-local' ? '保留本机' : choice === 'take-remote' ? '采用远端' : '两份都保留';
-      const { commit } = this.commitWorktree(
+      const { commit } = await this.commitWorktree(
         `解决冲突：${pin.dirName ?? skillId}（${label}）`,
         {
           [PROTOCOL_TRAILER]: String(SYNC_PROTOCOL_VERSION),
@@ -1051,7 +1051,7 @@ export class BackupService {
       );
       const commitId = commit ?? head;
 
-      this.writeConflicts(conflicts.filter((c) => c.skillId !== skillId));
+      await this.writeConflicts(conflicts.filter((c) => c.skillId !== skillId));
       this.deleteRef(`${PENDING_REF_PREFIX}/${skillId}`);
       if (newSkillId) this.library.appendEvent(newSkillId, 'imported', `冲突解决：保留远端版本为新 Skill（${label}）`);
 
@@ -1070,11 +1070,11 @@ export class BackupService {
   // ═════════════════════════ Git 基础操作 ═════════════════════════
 
   /** 最近一次本地提交的展示信息（单条 git log，不做变更统计；空仓库返回 null）。 */
-  private latestCommitInfo(): LastCommitInfo | null {
-    const out = runGit(
+  private async latestCommitInfo(): Promise<LastCommitInfo | null> {
+    const out = (await runGitAsync(
       ['log', '-n1', '--pretty=format:%H%x1f%cI%x1f%s'],
       { cwd: this.libraryDir, allowFailure: true, operation: 'log' },
-    ).stdout;
+    )).stdout;
     const line = out.split(/\r?\n/).find((part) => part.trim().length > 0);
     if (!line) return null;
     const [commitId, committedAt, ...rest] = line.split('\x1f');
@@ -1088,9 +1088,9 @@ export class BackupService {
     };
   }
 
-  private hasRepo(): boolean {
+  private async hasRepo(): Promise<boolean> {
     if (!fs.existsSync(path.join(this.libraryDir, '.git'))) return false;
-    const res = runGit(['rev-parse', '--git-dir'], {
+    const res = await runGitAsync(['rev-parse', '--git-dir'], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'rev-parse',
@@ -1098,33 +1098,33 @@ export class BackupService {
     return res.status === 0;
   }
 
-  private ensureRepo(): void {
+  private async ensureRepo(): Promise<void> {
     fs.mkdirSync(this.libraryDir, { recursive: true });
-    if (this.hasRepo()) return;
-    runGit(['init', '-b', 'main'], { cwd: this.libraryDir, operation: 'init' });
+    if (await this.hasRepo()) return;
+    runGitAsync(['init', '-b', 'main'], { cwd: this.libraryDir, operation: 'init' });
     // 跨机同步必须保持字节原样：关闭换行转换，允许长路径
-    runGit(['config', 'core.autocrlf', 'false'], { cwd: this.libraryDir, operation: 'config' });
-    runGit(['config', 'core.safecrlf', 'false'], { cwd: this.libraryDir, operation: 'config' });
-    runGit(['config', 'core.longpaths', 'true'], { cwd: this.libraryDir, operation: 'config' });
-    runGit(['config', 'core.quotepath', 'false'], { cwd: this.libraryDir, operation: 'config' });
-    const email = runGit(['config', 'user.email'], {
+    runGitAsync(['config', 'core.autocrlf', 'false'], { cwd: this.libraryDir, operation: 'config' });
+    runGitAsync(['config', 'core.safecrlf', 'false'], { cwd: this.libraryDir, operation: 'config' });
+    runGitAsync(['config', 'core.longpaths', 'true'], { cwd: this.libraryDir, operation: 'config' });
+    runGitAsync(['config', 'core.quotepath', 'false'], { cwd: this.libraryDir, operation: 'config' });
+    const email = (await runGitAsync(['config', 'user.email'], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'config',
-    }).stdout.trim();
+    })).stdout.trim();
     if (!email) {
-      runGit(['config', 'user.name', 'Skills Studio'], { cwd: this.libraryDir, operation: 'config' });
-      runGit(['config', 'user.email', 'skills-studio@localhost'], { cwd: this.libraryDir, operation: 'config' });
+      await runGitAsync(['config', 'user.name', 'Skills Studio'], { cwd: this.libraryDir, operation: 'config' });
+      runGitAsync(['config', 'user.email', 'skills-studio@localhost'], { cwd: this.libraryDir, operation: 'config' });
     }
     this.logger?.info('backup:repo-initialized', { libraryDir: this.libraryDir });
   }
 
-  private head(): string | null {
-    return this.revParse('HEAD');
+  private async head(): Promise<string | null> {
+    return await this.revParse('HEAD');
   }
 
-  private revParse(rev: string): string | null {
-    const res = runGit(['rev-parse', '--verify', '--quiet', rev], {
+  private async revParse(rev: string): Promise<string | null> {
+    const res = await runGitAsync(['rev-parse', '--verify', '--quiet', rev], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'rev-parse',
@@ -1133,14 +1133,14 @@ export class BackupService {
     return res.status === 0 && /^[0-9a-f]{40,64}$/.test(out) ? out : null;
   }
 
-  private resolveCommit(rev: string): string | null {
+  private async resolveCommit(rev: string): Promise<string | null> {
     if (!rev || rev.startsWith('-')) return null;
-    return this.revParse(`${rev}^{commit}`);
+    return await this.revParse(`${rev}^{commit}`);
   }
 
   /** 远端分支当前指向（ls-remote 只读；远端不可达时返回 null，交给随后的 push/fetch 报错）。 */
-  private remoteHeadOf(url: string, branch: string): string | null {
-    const res = runGit(['ls-remote', '--heads', url, `refs/heads/${branch}`], {
+  private async remoteHeadOf(url: string, branch: string): Promise<string | null> {
+    const res = await runGitAsync(['ls-remote', '--heads', url, `refs/heads/${branch}`], {
       cwd: this.libraryDir,
       timeoutMs: REMOTE_TIMEOUT_MS,
       allowFailure: true,
@@ -1153,23 +1153,25 @@ export class BackupService {
     return /^[0-9a-f]{40,64}$/.test(oid) ? oid : null;
   }
 
-  private parentOf(commit: string): string | null {
-    return this.revParse(`${commit}^`);
+  private async parentOf(commit: string): Promise<string | null> {
+    return await this.revParse(`${commit}^`);
   }
 
-  private isAncestor(maybeAncestor: string, descendant: string): boolean {
+  private async isAncestor(maybeAncestor: string, descendant: string): Promise<boolean> {
     return (
-      runGit(['merge-base', '--is-ancestor', maybeAncestor, descendant], {
-        cwd: this.libraryDir,
-        allowFailure: true,
-        operation: 'merge-base',
-      }).status === 0
+      (
+        await runGitAsync(['merge-base', '--is-ancestor', maybeAncestor, descendant], {
+          cwd: this.libraryDir,
+          allowFailure: true,
+          operation: 'merge-base',
+        })
+      ).status === 0
     );
   }
 
   /** 共同祖先；无共同历史时返回 ''（按空库为 base 合并）。 */
-  private mergeBaseOrEmpty(a: string, b: string): string {
-    const res = runGit(['merge-base', a, b], {
+  private async mergeBaseOrEmpty(a: string, b: string): Promise<string> {
+    const res = await runGitAsync(['merge-base', a, b], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'merge-base',
@@ -1222,19 +1224,19 @@ export class BackupService {
    * 把工作树提交成一次应用提交（协议 trailer 由调用方给出）。
    * 提交前统一：排除大技能 → `git add -A` → 把元数据里的本机绝对路径换成可移植形态。
    */
-  private commitWorktree(
+  private async commitWorktree(
     message: string,
     trailers: Record<string, string>,
     parents: string[],
     opts: { force?: boolean } = {},
-  ): { commit: string | null; tree: string } {
+  ): Promise<{ commit: string | null; tree: string }> {
     this.applyExclusions();
-    runGit(['add', '-A', '--', '.'], { cwd: this.libraryDir, operation: 'add' });
-    this.stagePortableMetadata();
-    const tree = runGitOk(['write-tree'], { cwd: this.libraryDir, operation: 'write-tree' });
+    await runGitAsync(['add', '-A', '--', '.'], { cwd: this.libraryDir, operation: 'add' });
+    await this.stagePortableMetadata();
+    const tree = await runGitOkAsync(['write-tree'], { cwd: this.libraryDir, operation: 'write-tree' });
 
     if (!opts.force && parents.length === 1) {
-      const parentTree = runGitOk(['rev-parse', `${parents[0]}^{tree}`], {
+      const parentTree = await runGitOkAsync(['rev-parse', `${parents[0]}^{tree}`], {
         cwd: this.libraryDir,
         operation: 'rev-parse',
       });
@@ -1244,20 +1246,20 @@ export class BackupService {
     const args = ['commit-tree', tree];
     for (const parent of parents) args.push('-p', parent);
     args.push('-m', appCommitMessage(message, trailers));
-    const commit = runGitOk(args, { cwd: this.libraryDir, operation: 'commit-tree' });
-    this.updateBranch(commit);
+    const commit = await runGitOkAsync(args, { cwd: this.libraryDir, operation: 'commit-tree' });
+    await this.updateBranch(commit);
     return { commit, tree };
   }
 
-  private updateBranch(commit: string): void {
-    runGit(['update-ref', `refs/heads/${this.readConfig().branch}`, commit], {
+  private async updateBranch(commit: string): Promise<void> {
+    runGitAsync(['update-ref', `refs/heads/${this.readConfig().branch}`, commit], {
       cwd: this.libraryDir,
       operation: 'update-ref',
     });
   }
 
   /** 把索引里的元数据换成不含本机绝对路径的版本（工作树保持可用的本机路径）。 */
-  private stagePortableMetadata(): void {
+  private async stagePortableMetadata(): Promise<void> {
     const origins = this.readOrigins();
     const next: Record<string, string> = {};
     for (const dirName of listMetaDirNames(this.library.skillsDir)) {
@@ -1268,12 +1270,12 @@ export class BackupService {
       next[meta.skillId] = origin;
       const { origin: _dropped, ...sourceRest } = meta.source;
       const portable = { ...meta, source: sourceRest };
-      const blob = runGitOk(['hash-object', '-w', '--stdin'], {
+      const blob = await runGitOkAsync(['hash-object', '-w', '--stdin'], {
         cwd: this.libraryDir,
         operation: 'hash-object',
         input: JSON.stringify(portable, null, 2) + '\n',
       });
-      runGit(
+      runGitAsync(
         ['update-index', '--add', '--cacheinfo', '100644', blob, `sync/${dirName}${SKILL_META_SUFFIX}`],
         { cwd: this.libraryDir, operation: 'update-index' },
       );
@@ -1315,25 +1317,25 @@ export class BackupService {
     return dirs;
   }
 
-  private changedSkillsOf(commit: string): string[] {
-    const paths = this.diffFilePaths(this.parentOf(commit), commit, ['skills']);
+  private async changedSkillsOf(commit: string): Promise<string[]> {
+    const paths = await this.diffFilePaths(await this.parentOf(commit), commit, ['skills']);
     return [...this.dirNamesFromTreePaths(paths)].sort();
   }
 
-  private diffFilePaths(from: string | null, to: string, paths: string[]): string[] {
+  private async diffFilePaths(from: string | null, to: string, paths: string[]): Promise<string[]> {
     const args = from
       ? ['diff', '--name-only', '--no-renames', '-z', from, to, '--', ...paths]
       : ['diff-tree', '--root', '--no-commit-id', '--name-only', '--no-renames', '-r', '-z', to, '--', ...paths];
-    const res = runGit(args, { cwd: this.libraryDir, allowFailure: true, operation: from ? 'diff' : 'diff-tree' });
+    const res = await runGitAsync(args, { cwd: this.libraryDir, allowFailure: true, operation: from ? 'diff' : 'diff-tree' });
     return res.stdout.split('\0').filter(Boolean);
   }
 
-  private diffFiles(from: string | null, to: string, paths: string[]): CommitFileDiff {
+  private async diffFiles(from: string | null, to: string, paths: string[]): Promise<CommitFileDiff> {
     const base = from === '' ? EMPTY_TREE : from;
     const args = base
       ? ['diff', '--name-status', '--no-renames', '-z', base, to, '--', ...paths]
       : ['diff-tree', '--root', '--no-commit-id', '--name-status', '--no-renames', '-r', '-z', to, '--', ...paths];
-    const res = runGit(args, { cwd: this.libraryDir, allowFailure: true, operation: base ? 'diff' : 'diff-tree' });
+    const res = await runGitAsync(args, { cwd: this.libraryDir, allowFailure: true, operation: base ? 'diff' : 'diff-tree' });
     const tokens = res.stdout.split('\0').filter(Boolean);
     const result: CommitFileDiff = { added: [], modified: [], removed: [] };
     for (let i = 0; i + 1 < tokens.length; i += 2) {
@@ -1431,7 +1433,7 @@ export class BackupService {
     fs.writeFileSync(path.join(infoDir, 'exclude'), lines.join('\n') + '\n', 'utf8');
 
     for (const item of excluded) {
-      runGit(
+      runGitAsync(
         [
           'rm',
           '-r',
@@ -1576,7 +1578,7 @@ export class BackupService {
   // ═════════════════════════ 冲突 pin ═════════════════════════
 
   private deleteRef(ref: string): void {
-    runGit(['update-ref', '-d', ref], { cwd: this.libraryDir, allowFailure: true, operation: 'update-ref' });
+    runGitAsync(['update-ref', '-d', ref], { cwd: this.libraryDir, allowFailure: true, operation: 'update-ref' });
   }
 
   private loadConflicts(): PendingConflictInfo[] {
@@ -1590,18 +1592,18 @@ export class BackupService {
     }
   }
 
-  private writeConflicts(conflicts: PendingConflictInfo[]): void {
+  private async writeConflicts(conflicts: PendingConflictInfo[]): Promise<void> {
     atomicWriteJson(path.join(this.dataDir, CONFLICTS_FILE), { schemaVersion: 1, conflicts });
-    this.prunePendingRefs(new Set(conflicts.map((c) => c.skillId)));
+    await this.prunePendingRefs(new Set(conflicts.map((c) => c.skillId)));
   }
 
   /** 清掉已不再待决的 pin ref（解决冲突 / 双方都删掉该技能时）。 */
-  private prunePendingRefs(keep: Set<string>): void {
-    const out = runGit(['for-each-ref', '--format=%(refname)', PENDING_REF_PREFIX], {
+  private async prunePendingRefs(keep: Set<string>): Promise<void> {
+    const out = (await runGitAsync(['for-each-ref', '--format=%(refname)', PENDING_REF_PREFIX], {
       cwd: this.libraryDir,
       allowFailure: true,
       operation: 'for-each-ref',
-    }).stdout;
+    })).stdout;
     for (const ref of out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
       const id = ref.slice(PENDING_REF_PREFIX.length + 1);
       if (!keep.has(id)) this.deleteRef(ref);
@@ -1653,24 +1655,26 @@ export class BackupService {
     }
   }
 
-  private createSnapshot(commit: string, kind: string): string {
+  private async createSnapshot(commit: string, kind: string): Promise<string> {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); // YYYYMMDD-HHMMSS
     const safeKind = kind.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40);
     const base = `${SNAPSHOT_REF_PREFIX}/${stamp}-${safeKind}-${commit.slice(0, 8)}`;
     let ref = base;
     let n = 2;
-    while (this.refExists(ref)) ref = `${base}-${n++}`;
-    runGit(['update-ref', ref, commit], { cwd: this.libraryDir, operation: 'update-ref' });
+    while (await this.refExists(ref)) ref = `${base}-${n++}`;
+    runGitAsync(['update-ref', ref, commit], { cwd: this.libraryDir, operation: 'update-ref' });
     return ref;
   }
 
-  private refExists(ref: string): boolean {
+  private async refExists(ref: string): Promise<boolean> {
     return (
-      runGit(['show-ref', '--verify', '--quiet', ref], {
-        cwd: this.libraryDir,
-        allowFailure: true,
-        operation: 'show-ref',
-      }).status === 0
+      (
+        await runGitAsync(['show-ref', '--verify', '--quiet', ref], {
+          cwd: this.libraryDir,
+          allowFailure: true,
+          operation: 'show-ref',
+        })
+      ).status === 0
     );
   }
 
@@ -1678,7 +1682,7 @@ export class BackupService {
 
   /** 工作树与索引切换到某提交（不移动分支）。 */
   private applyTree(commit: string): void {
-    runGit(['read-tree', '-u', '--reset', commit], { cwd: this.libraryDir, operation: 'read-tree' });
+    runGitAsync(['read-tree', '-u', '--reset', commit], { cwd: this.libraryDir, operation: 'read-tree' });
   }
 
   private rollbackWorktree(commit: string): void {

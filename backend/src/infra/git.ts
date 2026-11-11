@@ -13,7 +13,7 @@
  *  GIT_NOT_INSTALLED / GIT_TIMEOUT / GIT_NETWORK_ERROR / GIT_AUTH_ERROR /
  *  GIT_PUSH_REJECTED / GIT_<OP>_FAILED
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export const GIT_DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -119,13 +119,6 @@ function operationOf(args: string[], explicit?: string): string {
  */
 export function runGit(args: string[], opts: GitRunOptions): GitRunResult {
   const operation = operationOf(args, opts.operation);
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    // 凭据缺失时直接报错，不弹交互提示（tec.md §7.3）
-    GIT_TERMINAL_PROMPT: '0',
-    GCM_INTERACTIVE: 'never',
-    ...opts.env,
-  };
   const res = spawnSync('git', args, {
     cwd: opts.cwd,
     windowsHide: true,
@@ -133,11 +126,87 @@ export function runGit(args: string[], opts: GitRunOptions): GitRunResult {
     encoding: 'utf8',
     input: opts.input,
     maxBuffer: MAX_BUFFER,
-    env,
+    env: gitEnv(opts.env),
   });
+  return finalizeGitResult(res, opts, operation);
+}
 
+/**
+ * runGit 的异步版（GUI 主进程专用）：spawn + Promise，git 运行期间（含 push/pull
+ * 的网络等待，上限默认 120s）主进程事件循环保持响应，窗口不再「未响应」。
+ * 判定/分类/脱敏与同步版共用同一套 finalize，行为逐字段一致。
+ */
+export async function runGitAsync(args: string[], opts: GitRunOptions): Promise<GitRunResult> {
+  const operation = operationOf(args, opts.operation);
+  const res = await execGitAsync(args, opts);
+  return finalizeGitResult(res, opts, operation);
+}
+
+/** 统一 git 环境（凭据交互关闭，tec.md §7.3）。 */
+function gitEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', ...extra };
+}
+
+interface RawGitResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: { code?: string; message: string };
+}
+
+/** 收集异步 git 子进程结果（spawnSync 同构形态）；超时 kill、超限断流。 */
+function execGitAsync(args: string[], opts: GitRunOptions): Promise<RawGitResult> {
+  return new Promise((resolve) => {
+    const child = spawn('git', args, { cwd: opts.cwd, windowsHide: true, env: gitEnv(opts.env) });
+    let stdout = '';
+    let stderr = '';
+    let overflow = false;
+    const timeoutMs = opts.timeoutMs ?? GIT_DEFAULT_TIMEOUT_MS;
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    const append = (which: 'stdout' | 'stderr') => (chunk: string) => {
+      // 与 spawnSync maxBuffer 同义：超限即杀进程，error 语义对齐（finalize 走 GIT_<OP>_FAILED）
+      if (which === 'stdout') {
+        stdout += chunk;
+        if (stdout.length > MAX_BUFFER) overflow = true;
+      } else {
+        stderr += chunk;
+      }
+    };
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', append('stdout'));
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', append('stderr'));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ status: null, stdout, stderr, error: { code: (err as NodeJS.ErrnoException).code ?? '', message: err.message } });
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      if (overflow) {
+        resolve({ status: status ?? -1, stdout, stderr, error: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', message: 'maxBuffer exceeded' } });
+        return;
+      }
+      resolve({
+        status: status ?? -1,
+        stdout,
+        stderr,
+        error: killedByTimeout(timeoutMs, child) ? { code: 'ETIMEDOUT', message: `git 超时（>${Math.round(timeoutMs / 1000)}s）` } : undefined,
+      });
+    });
+    if (opts.input != null) child.stdin.end(opts.input);
+    else child.stdin.end();
+  });
+}
+
+/** close 时刻判断是否超时被杀：exitCode 为 null 即被信号终止。 */
+function killedByTimeout(timeoutMs: number, child: import('node:child_process').ChildProcess): boolean {
+  return child.exitCode == null && child.signalCode != null && timeoutMs > 0;
+}
+
+/** 同步/异步共用的结果定稿：错误分类、脱敏、allowFailure 语义（行为唯一来源）。 */
+function finalizeGitResult(res: RawGitResult, opts: GitRunOptions, operation: string): GitRunResult {
   if (res.error) {
-    const errCode = (res.error as NodeJS.ErrnoException).code;
+    const errCode = res.error.code;
     if (errCode === 'ENOENT') {
       throw new GitError('GIT_NOT_INSTALLED', '未检测到系统 git，备份与同步不可用');
     }
@@ -172,6 +241,11 @@ export function runGitOk(args: string[], opts: GitRunOptions): string {
   return runGit(args, opts).stdout.trim();
 }
 
+/** runGitOk 的异步版（GUI 主进程专用，见 runGitAsync）。 */
+export async function runGitOkAsync(args: string[], opts: GitRunOptions): Promise<string> {
+  return (await runGitAsync(args, opts)).stdout.trim();
+}
+
 /** 执行 git 并返回二进制 stdout（`cat-file blob` 用）。 */
 export function runGitBuffer(args: string[], opts: GitRunOptions): Buffer {
   const operation = operationOf(args, opts.operation);
@@ -180,23 +254,23 @@ export function runGitBuffer(args: string[], opts: GitRunOptions): Buffer {
     windowsHide: true,
     timeout: opts.timeoutMs ?? GIT_DEFAULT_TIMEOUT_MS,
     maxBuffer: MAX_BUFFER,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', ...opts.env },
+    encoding: 'buffer',
+    env: gitEnv(opts.env),
   });
-  if (res.error) {
-    if ((res.error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new GitError('GIT_NOT_INSTALLED', '未检测到系统 git，备份与同步不可用');
-    }
-    throw new GitError(`GIT_${operation.toUpperCase()}_FAILED`, `git 启动失败：${res.error.message}`);
-  }
-  if ((res.status ?? -1) !== 0) {
-    const stderr = String(res.stderr ?? '');
-    throw new GitError(
-      classifyGitFailure(stderr, operation),
-      `git ${operation} 失败`,
-      redactGitOutput(stderr),
-    );
-  }
+  finalizeGitResult(
+    { status: res.status, stdout: '', stderr: res.stderr.toString('utf8'), error: res.error ? { code: (res.error as NodeJS.ErrnoException).code, message: res.error.message } : undefined },
+    opts,
+    operation,
+  );
   return Buffer.isBuffer(res.stdout) ? res.stdout : Buffer.from(res.stdout ?? '');
+}
+
+/** runGitBuffer 的异步版（GUI 主进程专用，见 runGitAsync）。 */
+export async function runGitBufferAsync(args: string[], opts: GitRunOptions): Promise<Buffer> {
+  const operation = operationOf(args, opts.operation);
+  const raw = await execGitAsync(args, opts);
+  const finalized = finalizeGitResult(raw, opts, operation);
+  return Buffer.from(finalized.stdout, 'utf8');
 }
 
 /**
