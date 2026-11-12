@@ -239,7 +239,7 @@ export interface AgentSessionRecord {
   schemaVersion: number;
   sessionId: string;
   title: string;
-  /** 授权目录：本会话工具读写的唯一边界（技能目录或临时沙箱目录） */
+  /** 会话工作目录：文件工具相对路径和命令的执行基准 */
   authorizedDir: string;
   /** 工具策略：当前会话统一为 read-write，保留字段以兼容旧记录。 */
   toolPolicy?: SandboxToolPolicy;

@@ -445,7 +445,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
 
   const previewSessionFile = (sessionId: string, relPath: string): ConversationPreviewFileResult => {
     const detail = context.conversations.getSession(sessionId);
-    const abs = resolvePathInsideRoot(detail.authorizedDir, relPath);
+    const abs = detail.files.find((file) => file.relPath === relPath)?.path
+      ?? resolvePathInsideRoot(detail.authorizedDir, relPath);
     const stat = fs.lstatSync(abs);
     if (stat.isSymbolicLink() || !stat.isFile()) {
       return { relPath, absolutePath: abs, size: stat.size, content: null, base64: null, mediaType: null, reason: 'NOT_A_FILE' };
@@ -1292,7 +1293,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): IpcHandlers {
       const sessionId = requireString(payload, 'sessionId');
       const relPath = requireString(payload, 'relPath');
       const detail = context.conversations.getSession(sessionId);
-      const abs = resolvePathInsideRoot(detail.authorizedDir, relPath);
+      const abs = detail.files.find((file) => file.relPath === relPath)?.path
+        ?? resolvePathInsideRoot(detail.authorizedDir, relPath);
       if (!fs.lstatSync(abs).isFile()) throw new AgentError('BAD_REQUEST', '文件不存在');
       const error = await deps.openPath(path.dirname(abs));
       if (error) throw new AgentError('OPEN_FAILED', error);

@@ -3,12 +3,12 @@
  *
  * 职责：
  *  - 会话生命周期：createSession / appendUserMessage / startRun / cancelRun / listSessions / getSession / resume；
- *  - 运行编排：Pi 会话 + 受限工具 + 授权目录守卫 + 事件流（status/message/tool/usage/file/error/done）；
+ *  - 运行编排：Pi 会话 + 文件及命令工具 + 事件流（status/message/tool/usage/file/error/done）；
  *  - 持久化：消息/状态/文件引用落 DATA_DIR/sessions（重启可恢复），Pi 会话文件承载模型上下文；
  *  - 错误语义：NO_MODEL_CONFIGURED / PROVIDER_AUTH_FAILED / PROVIDER_TIMEOUT /
  *    TOOL_OUT_OF_SCOPE / TASK_CANCELLED / PI_*，一律结构化 code + detail。
  *
- * 业务编排（创建/改进/评测的提示词与报告落盘）在 T07，本服务不写授权目录以外的路径。
+ * 业务编排（创建/改进/评测的提示词与报告落盘）在 T07，本服务持久化会话与文件变更。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -47,7 +47,7 @@ export interface ConversationServiceOptions {
   logger?: RedactableLogger;
   /**
    * 产品自带的内置 skill（skill-creator、skill-creator-sop、skill-improve、skill-doctor）。
-   * 它们作为「Agent 可发现的 skill」暴露：清单写进系统提示，目录作为只读根授权（写操作仍在会话授权目录内）。
+   * 它们作为「Agent 可发现的 skill」暴露：清单写进系统提示，按需由 Agent 读取。
    */
   builtinSkills?: readonly BuiltinSkillRef[];
   /**
@@ -86,7 +86,7 @@ interface RunState {
   usage: AgentUsage | null;
 }
 
-/** 默认系统提示：把「授权目录 + 越界即中止」的规则明确写给模型（不是唯一防线，工具层仍强制）。 */
+/** 默认系统提示：会话目录是工作目录，文件和命令工具可访问其他路径。 */
 export function buildSystemPrompt(
   authorizedDir: string,
   extra?: string | null,
@@ -94,19 +94,17 @@ export function buildSystemPrompt(
 ): string {
   const lines = [
     '你是 Skills 工作台的技能助手，帮助用户创建、优化和评测 Agent Skill。',
-    `本次会话的授权目录是：${authorizedDir}`,
+    `本次会话的工作目录是：${authorizedDir}`,
     '规则：',
-    builtinSkills.length > 0
-      ? '1. 授权目录内可读写文件；下方列出的内部 Skill 目录只读。路径用相对路径；任何越界调用会被拦截并终止本次运行。'
-      : '1. 只能读写授权目录内的文件，路径用相对路径；任何越界调用会被拦截并终止本次运行。',
-    '2. 需要生成或修改文件时使用 write / edit 工具，不要假设自己有 shell。',
+    '1. 文件工具和命令工具可访问工作目录以外的路径；相对路径以工作目录为基准。',
+    '2. 需要生成或修改文件时可使用 write / edit，也可按需使用 bash / powershell。',
     '3. 回答使用简体中文，先说明意图再动手，结束前简述改动了哪些文件。',
     '4. 不要在回答、文件名或文件内容中写入 API Key、令牌或其他凭据。',
   ];
   if (builtinSkills.length > 0) {
     lines.push(
       '',
-      '可用技能（产品自带，只能读，按需用 read 打开对应 SKILL.md 获取完整流程）：',
+      '可用技能（产品自带，按需用 read 打开对应 SKILL.md 获取完整流程）：',
       ...builtinSkills.map((skill) => `- ${skill.name}：${skill.description || '（无描述）'} → ${skill.file}`),
       '当用户的要求与某个技能匹配时，先读取它的 SKILL.md 再按其流程执行。创建 Skill 默认使用 skill-creator；只有用户显式指定 skill-creator-sop 时才使用后者。优化使用 skill-improve，评测使用 skill-doctor。',
     );
@@ -124,9 +122,8 @@ export class ConversationService {
   /** T15：全局订阅（主进程 → 渲染层事件桥只需一次转发）。 */
   private readonly allListeners = new Set<AgentEventListener>();
   private readonly active = new Map<string, ActiveRun>();
-  /** 内置 skill：清单进系统提示，所在目录作为只读根授权 */
+  /** 内置 skill 清单进入系统提示。 */
   private builtinSkills: readonly BuiltinSkillRef[];
-  private builtinSkillRoots: readonly string[];
   private readonly builtinSkillsRoot: string | undefined;
 
   constructor(options: ConversationServiceOptions) {
@@ -149,12 +146,9 @@ export class ConversationService {
     this.logger = options.logger ? withRedaction(options.logger) : null;
     this.builtinSkills = options.builtinSkills ?? [];
     this.builtinSkillsRoot = options.builtinSkillsRoot;
-    this.builtinSkillRoots = [
-      ...new Set(this.builtinSkills.map((skill) => path.dirname(path.dirname(skill.file)))),
-    ];
   }
 
-  /** 返回与系统提示和只读根同源的内部 Skill 清单，供聊天输入区使用。 */
+  /** 返回系统提示中的内部 Skill 清单，供聊天输入区使用。 */
   listAvailableSkills(): { name: string; description: string }[] {
     this.refreshBuiltinSkills();
     return this.builtinSkills.map(({ name, description }) => ({ name, description }));
@@ -163,7 +157,7 @@ export class ConversationService {
   /**
    * 重新扫描内部 Skill 目录：`agents/skills` 是可直接投放新 Skill 的目录，
    * 加了目录不用重启应用就能出现在 `/` 候选与系统提示里。
-   * 清单未变时不动只读根（避免每次按键都重建授权结构）。
+   * 清单未变时不更新提示内容。
    */
   private refreshBuiltinSkills(): void {
     const scanned = listBuiltinSkills(this.builtinSkillsRoot);
@@ -175,9 +169,6 @@ export class ConversationService {
       );
     if (unchanged) return;
     this.builtinSkills = scanned;
-    this.builtinSkillRoots = [
-      ...new Set(scanned.map((skill) => path.dirname(path.dirname(skill.file)))),
-    ];
     this.log('builtin-skills-refreshed', { count: scanned.length });
   }
 
@@ -539,9 +530,7 @@ export class ConversationService {
       this.store.save(record);
       this.emitStatus(record, run.runId, 'running');
 
-      const scope = new ToolScopeGuard(record.authorizedDir, {
-        readOnlyRoots: this.builtinSkillRoots,
-      });
+      const scope = new ToolScopeGuard(record.authorizedDir);
       handle = await this.bridge.createSession({
         authorizedDir: record.authorizedDir,
         providerId: selection.providerId,
@@ -755,7 +744,7 @@ export class ConversationService {
       if (state.violation) {
         this.finishRun(record, run.runId, 'failed', {
           code: 'TOOL_OUT_OF_SCOPE',
-          detail: `工具调用越出授权目录，本次运行已中止：${state.violation.reason}`,
+          detail: `工具调用未通过检查，本次运行已中止：${state.violation.reason}`,
         });
       } else if (cancelRequested || state.stopReason === 'aborted') {
         this.finishRun(record, run.runId, 'cancelled', {
@@ -1027,6 +1016,10 @@ function summarizeToolCall(toolName: string, args: Record<string, unknown>, scop
       const pattern = typeof args.pattern === 'string' ? args.pattern : '';
       return `查找 ${truncateText(pattern, 40)} @ ${rel}`;
     }
+    case 'bash':
+      return '执行 Bash 命令';
+    case 'powershell':
+      return '执行 PowerShell 命令';
     default:
       return rel;
   }

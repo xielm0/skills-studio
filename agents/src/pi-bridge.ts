@@ -275,7 +275,7 @@ export class PiBridge {
       model,
       modelRuntime: runtime,
       thinkingLevel: options.thinkingLevel ?? 'off',
-      // 所有对话都可在授权目录内读写，内置 Skill 目录仍由工具守卫限制为只读。
+      // 全部 Pi 内置工具可用；工作目录仅决定相对路径基准。
       tools: [...scope.allowedTools],
       sessionManager,
       settingsManager,
